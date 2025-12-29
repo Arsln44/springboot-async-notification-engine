@@ -92,7 +92,70 @@ The `NotificationEvent` flows through the notification engine in the following s
 
 Throughout this flow, the `NotificationEvent` remains immutable from the perspective of the queue system—it is created once, passed through the queue, and consumed once. Any modifications or enrichments would occur in the producer or processor layers, not within the queue infrastructure itself.
 
-## 7. Non-Goals
+## 7. In-Memory Queue Configuration
+
+The notification engine uses a bounded `BlockingQueue<NotificationEvent>` implemented via `LinkedBlockingQueue` as the core data structure for in-memory notification buffering. This configuration provides the foundation for asynchronous notification processing.
+
+### Why Bounded Queue?
+
+A bounded queue (with a fixed maximum capacity) is chosen over an unbounded queue for several critical reasons:
+
+- **Memory Protection**: Prevents unbounded memory growth that could lead to `OutOfMemoryError` when notification production outpaces consumption. The fixed capacity provides a predictable upper bound on memory usage for queued notifications.
+
+- **Backpressure Mechanism**: When the queue reaches its capacity, producer threads attempting to enqueue notifications will block, naturally applying backpressure. This prevents producers from overwhelming the system and gives consumers time to catch up, maintaining system stability.
+
+- **Resource Awareness**: Forces system designers to consider queue sizing relative to expected workload and processing capacity, promoting conscious resource planning and capacity management.
+
+- **Fail-Fast Behavior**: By blocking producers when the queue is full (rather than allowing unbounded growth), the system exposes capacity issues early, making problems visible rather than silently consuming memory until exhaustion.
+
+- **Performance Optimization**: Bounded queues with appropriate sizing can improve throughput by maintaining optimal queue depth—too small causes excessive blocking, too large increases memory overhead without benefit. A well-sized bounded queue strikes a balance between producer and consumer efficiency.
+
+### Queue Lifecycle
+
+The queue lifecycle follows these stages:
+
+1. **Initialization**: During Spring application context startup, the `NotificationQueueConfig` configuration class creates a `LinkedBlockingQueue<NotificationEvent>` instance with the configured capacity (default: 1000). The queue is registered as a Spring bean, making it available for dependency injection throughout the application.
+
+2. **Active Operation**: Once initialized, the queue operates continuously throughout the application's lifetime. Producers enqueue `NotificationEvent` objects, and consumers dequeue them for processing. The queue maintains a FIFO (First-In-First-Out) ordering of notifications.
+
+3. **Runtime State**: The queue can exist in three states:
+   - **Empty**: No notifications are queued; consumers will block when attempting to dequeue.
+   - **Partially Filled**: Contains some notifications but has remaining capacity; both producers and consumers can operate without blocking (assuming concurrent access).
+   - **Full**: Reached maximum capacity; producers will block on enqueue operations until space becomes available.
+
+4. **Shutdown**: When the application shuts down, the queue instance is discarded along with any remaining queued notifications. There is no persistence or graceful shutdown mechanism—all queued notifications are lost during application termination.
+
+### What Happens When Queue is Full?
+
+When the queue reaches its maximum capacity and a producer attempts to enqueue a notification, the behavior depends on the operation used:
+
+- **Blocking Operations (`put()`)**: The producer thread blocks indefinitely until space becomes available in the queue. This is the default behavior that provides natural backpressure—producers wait, consuming no CPU resources, until a consumer removes a notification and frees space.
+
+- **Non-Blocking Operations (`offer()`)**: If producers use `offer()` instead of `put()`, the operation returns `false` immediately when the queue is full, allowing producers to implement alternative strategies (e.g., logging, metrics, fallback handling, or retry logic) rather than blocking.
+
+- **Timeout Operations (`offer(timeout)`)**: Producers can use `offer()` with a timeout, which will block for the specified duration. If space becomes available within the timeout, the notification is enqueued and `true` is returned. If the timeout expires, `false` is returned, allowing producers to handle the failure scenario.
+
+The choice of operation (`put()` vs `offer()`) determines how backpressure is handled. Blocking operations (`put()`) ensure no notifications are lost but may slow down producers, while non-blocking operations allow producers to continue but may require explicit handling of rejected notifications.
+
+### Thread-Safety Guarantees
+
+The `LinkedBlockingQueue` implementation provides strong thread-safety guarantees:
+
+- **Concurrent Access**: Multiple producer threads can safely enqueue notifications simultaneously without synchronization issues. Similarly, multiple consumer threads can safely dequeue notifications concurrently. The queue internally handles all synchronization.
+
+- **Atomic Operations**: All queue operations (enqueue, dequeue, size checks) are atomic. A single notification cannot be partially enqueued or dequeued, preventing corruption or data inconsistency.
+
+- **Visibility Guarantees**: The queue uses `volatile` variables and `java.util.concurrent.locks` internally to ensure that changes made by one thread are immediately visible to other threads, satisfying Java Memory Model requirements for concurrent access.
+
+- **Happens-Before Relationships**: Enqueue and dequeue operations establish proper happens-before relationships, ensuring that if a producer enqueues a notification before a consumer starts dequeuing, the consumer will see that notification.
+
+- **No External Synchronization Required**: Application code using the queue does not need to add external synchronization (e.g., `synchronized` blocks, explicit locks) when performing queue operations. The queue handles all thread-safety internally.
+
+- **Lock-Free Where Possible**: `LinkedBlockingQueue` uses separate locks for enqueue and dequeue operations (two-lock queue algorithm), allowing producers and consumers to operate in parallel without contention, improving throughput in high-concurrency scenarios.
+
+These guarantees ensure that the queue can be safely used in a multi-threaded environment where multiple producers and consumers operate concurrently without race conditions, data corruption, or other concurrency-related issues.
+
+## 8. Non-Goals
 
 The following are explicitly out of scope for this project:
 
