@@ -155,7 +155,73 @@ The `LinkedBlockingQueue` implementation provides strong thread-safety guarantee
 
 These guarantees ensure that the queue can be safely used in a multi-threaded environment where multiple producers and consumers operate concurrently without race conditions, data corruption, or other concurrency-related issues.
 
-## 8. Non-Goals
+## 8. NotificationProducer Service
+
+The `NotificationProducer` service is the entry point for submitting notifications into the async processing pipeline. It accepts `NotificationEvent` objects and enqueues them into the `BlockingQueue` for later consumption by consumer workers. The producer's responsibility is intentionally limited to queueing operations only—it does not process, validate, or deliver notifications.
+
+### Why Producer Must Be Lightweight
+
+The producer service must remain lightweight for several critical reasons:
+
+- **Non-Blocking API Design**: The producer is typically called from user-facing code paths (e.g., REST controllers, event handlers, scheduled tasks). A lightweight producer that quickly enqueues notifications and returns ensures that these code paths remain responsive and do not block waiting for slow notification operations.
+
+- **Scalability**: A lightweight producer can handle high throughput of notification submissions. If the producer were heavy (e.g., performing validation, transformation, or external service calls), it would become a bottleneck, limiting the system's ability to accept notifications at a high rate.
+
+- **Separation of Concerns**: By keeping the producer simple and focused solely on queueing, the system maintains clear separation between notification submission (producer's responsibility) and notification processing (consumer's responsibility). This separation allows each component to be optimized and scaled independently.
+
+- **Queue Backpressure Handling**: When the queue is full, the producer will block (if using `put()` operation). A lightweight producer minimizes the impact of this blocking—the thread is simply waiting, consuming minimal resources. A heavy producer with additional processing would waste more resources during blocking periods.
+
+- **Low Latency**: User-facing operations that trigger notifications (e.g., user registration, order placement) should complete quickly. A lightweight producer ensures that the notification submission step adds minimal latency to these operations.
+
+- **Resource Efficiency**: Heavy processing in the producer would consume resources (CPU, memory, thread time) that should be reserved for consumers. By keeping producers lightweight, resources are allocated where they matter most—in processing and delivering notifications.
+
+### Error Handling Strategy
+
+The `NotificationProducer` implements a focused error handling strategy:
+
+- **Null Validation**: The producer validates that the `NotificationEvent` is not null before attempting to enqueue it, throwing an `IllegalArgumentException` immediately. This fails-fast approach prevents null events from propagating through the system and provides clear feedback to callers.
+
+- **InterruptedException Handling**: When using the blocking `put()` operation, the producer properly handles `InterruptedException` by:
+  - Logging the interruption for debugging and monitoring
+  - Restoring the interrupt status on the thread (`Thread.currentThread().interrupt()`) to preserve the interrupted state for upper layers
+  - Re-throwing the exception to allow callers to handle the interruption appropriately
+  
+  This ensures that thread interruption signals are not lost and can be handled by upstream code (e.g., application shutdown scenarios).
+
+- **Unexpected Exception Wrapping**: For any other unexpected exceptions during enqueueing (which should be rare given the simplicity of the operation), the producer:
+  - Logs the error with contextual information (event ID) for troubleshooting
+  - Wraps the exception in a `RuntimeException` with a descriptive message
+  - Allows the exception to propagate to callers for appropriate handling
+
+- **No Retry Logic**: The producer does not implement retry logic for failed enqueue operations. Retries should be handled at a higher level (e.g., by the caller or through application-level retry mechanisms) if needed. This keeps the producer simple and avoids coupling it to retry policies.
+
+- **Logging Strategy**: The producer uses appropriate log levels:
+  - `DEBUG` for successful enqueueing (to avoid log noise in production)
+  - `ERROR` for exceptions (to ensure failures are visible and actionable)
+
+This error handling strategy balances simplicity with robustness, ensuring that errors are properly surfaced without adding complexity to the producer's core responsibility.
+
+### Why This Layer Should Not Know Consumers
+
+The `NotificationProducer` is deliberately designed to be unaware of consumers for several architectural reasons:
+
+- **Loose Coupling**: By not knowing about consumers, the producer remains decoupled from consumption logic. This allows consumers to be added, removed, or modified without requiring changes to the producer code, promoting system flexibility and maintainability.
+
+- **Single Responsibility**: The producer's single responsibility is accepting and enqueueing notifications. Adding knowledge of consumers would introduce additional concerns (e.g., consumer availability, processing status, consumer configuration) that belong in other layers of the system.
+
+- **Queue as Abstraction**: The `BlockingQueue` serves as an abstraction boundary between producers and consumers. Producers interact only with the queue interface, not with consumer implementations. This abstraction allows the system to evolve—consumers can be refactored, replaced, or scaled without affecting producers.
+
+- **Scalability Independence**: Producers and consumers can be scaled independently when they are decoupled. The number of producers can grow based on incoming request volume, while the number of consumers can be adjusted based on processing capacity needs, without either side needing to know about the other.
+
+- **Testing Simplicity**: A producer that doesn't know about consumers is easier to test in isolation. Unit tests can focus solely on queueing behavior without needing to mock or configure consumer dependencies, leading to simpler and more maintainable test suites.
+
+- **Flexibility in Consumer Implementation**: The system can support multiple consumer implementations (e.g., different processors for different notification types, parallel consumers, priority-based consumers) without the producer needing to be aware of these details. The queue handles the routing and buffering, allowing consumers to be implemented and evolved independently.
+
+- **Future Extensibility**: Decoupling producers from consumers allows the system to evolve in ways that would be difficult if they were tightly coupled. For example, the system could later add multiple queues, queue routing logic, or even move to a distributed queue implementation without requiring producer changes.
+
+This design follows the Producer-Consumer pattern's core principle: producers and consumers communicate only through the shared queue, never directly with each other. This principle ensures a clean separation of concerns and promotes a more maintainable and scalable architecture.
+
+## 9. Non-Goals
 
 The following are explicitly out of scope for this project:
 
