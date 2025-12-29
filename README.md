@@ -1,431 +1,431 @@
 # CoreNotifyEngine
 
-## 1. Project Purpose
+## 1. Proje Amacı
 
-CoreNotifyEngine is a lightweight, self-contained asynchronous notification engine built with Spring Boot. It implements an in-memory message queue using Java's `BlockingQueue` and follows the Producer-Consumer pattern to handle notification processing asynchronously within a single JVM instance.
+CoreNotifyEngine, Spring Boot ile oluşturulmuş hafif, kendi kendine yeten (self-contained) bir asenkron bildirim motorudur. Java'nın `BlockingQueue` yapısını kullanarak bellek içi (in-memory) bir mesaj kuyruğu uygular ve bildirim işlemlerini tek bir JVM örneği içinde asenkron olarak yönetmek için Üretici-Tüketici (Producer-Consumer) desenini takip eder.
 
-The engine provides a simple, dependency-free solution for applications that need to decouple notification generation from notification delivery without introducing external messaging infrastructure. It allows producers (e.g., REST endpoints, scheduled tasks, event handlers) to submit notifications to a queue, while dedicated consumer threads process these notifications independently, enabling non-blocking and scalable notification handling.
+Bu motor, bildirim üretimini bildirim tesliminden ayırması gereken, ancak harici bir mesajlaşma altyapısı kurmak istemeyen uygulamalar için basit, bağımlılık içermeyen bir çözüm sunar. Üreticilerin (örn. REST uç noktaları, zamanlanmış görevler, olay işleyicileri) bir kuyruğa bildirim göndermesine olanak tanırken, özel tüketici thread'leri (iş parçacıkları) bu bildirimleri bağımsız olarak işleyerek bloklamayan ve ölçeklenebilir bir bildirim yönetimi sağlar.
 
-## 2. Problems It Solves
+## 2. Çözdüğü Sorunlar
 
-- **Decoupled Processing**: Separates notification generation from notification delivery, preventing slow notification operations (e.g., email sending, SMS delivery, push notifications) from blocking main application threads.
+- **Ayrıştırılmış İşleme (Decoupled Processing):** Bildirim üretimini bildirim tesliminden ayırarak, yavaş bildirim işlemlerinin (örn. e-posta gönderimi, SMS teslimi, push bildirimleri) ana uygulama thread'lerini bloklamasını önler.
 
-- **Improved Responsiveness**: By processing notifications asynchronously, the engine ensures that API endpoints and business logic remain responsive even when notification channels experience delays or failures.
+- **Geliştirilmiş Tepkisellik (Improved Responsiveness):** Bildirimleri asenkron olarak işleyerek, bildirim kanallarında gecikmeler veya hatalar olsa bile API uç noktalarının ve iş mantığının yanıt verebilir durumda kalmasını sağlar.
 
-- **Resource Efficiency**: Utilizes thread pools and bounded queues to control resource consumption, preventing notification backlogs from overwhelming the system.
+- **Kaynak Verimliliği:** Thread havuzları ve sınırlandırılmış kuyruklar kullanarak kaynak tüketimini kontrol eder, böylece bildirim yığılmalarının sistemi bunaltmasını engeller.
 
-- **Simplicity**: Eliminates the need for external message brokers (like RabbitMQ, Kafka, or Redis), reducing operational complexity, deployment overhead, and infrastructure dependencies.
+- **Basitlik:** Harici mesaj aracılarına (RabbitMQ, Kafka veya Redis gibi) olan ihtiyacı ortadan kaldırarak operasyonel karmaşıklığı, dağıtım yükünü ve altyapı bağımlılıklarını azaltır.
 
-- **Fail-Safe Isolation**: Notification processing failures are isolated from the main application flow, allowing graceful error handling and retry mechanisms without impacting user-facing operations.
+- **Hata Korumalı İzolasyon:** Bildirim işleme hataları ana uygulama akışından izole edilmiştir, bu da kullanıcıya dönük operasyonları etkilemeden zarif hata yönetimi ve yeniden deneme mekanizmalarına olanak tanır.
 
-## 3. Why No External Broker Is Used
+## 3. Neden Harici Bir Broker (Aracı) Kullanılmıyor?
 
-CoreNotifyEngine deliberately avoids external message brokers for several reasons:
+CoreNotifyEngine, çeşitli nedenlerle harici mesaj aracılarını bilinçli olarak kullanmaz:
 
-- **Zero Infrastructure Overhead**: No need to deploy, configure, monitor, or maintain additional infrastructure components (message brokers, Redis clusters, etc.), reducing operational complexity and costs.
+- **Sıfır Altyapı Yükü:** Ek altyapı bileşenlerini (mesaj aracıları, Redis kümeleri vb.) dağıtmaya, yapılandırmaya, izlemeye veya sürdürmeye gerek yoktur; bu da operasyonel karmaşıklığı ve maliyetleri azaltır.
 
-- **Lower Latency**: In-memory queues provide minimal latency compared to network-based messaging systems, making it ideal for single-application notification scenarios.
+- **Daha Düşük Gecikme:** Bellek içi kuyruklar, ağ tabanlı mesajlaşma sistemlerine kıyasla minimal gecikme sağlar, bu da tek uygulamalı bildirim senaryoları için idealdir.
 
-- **Deployment Simplicity**: The engine runs entirely within the application process, eliminating network dependencies, connection management, and broker availability concerns during deployment and scaling.
+- **Dağıtım Basitliği:** Motor tamamen uygulama süreci içinde çalışır, bu da dağıtım ve ölçeklendirme sırasında ağ bağımlılıklarını, bağlantı yönetimini ve broker kullanılabilirliği endişelerini ortadan kaldırır.
 
-- **Cost Efficiency**: Avoids the licensing, hosting, and maintenance costs associated with external messaging infrastructure, making it suitable for smaller applications or environments with budget constraints.
+- **Maliyet Verimliliği:** Harici mesajlaşma altyapısıyla ilişkili lisanslama, barındırma ve bakım maliyetlerinden kaçınır, bu da onu daha küçük uygulamalar veya bütçe kısıtlamaları olan ortamlar için uygun hale getirir.
 
-- **Development Speed**: No need to set up development environments with message brokers, simplifying local development and CI/CD pipelines.
+- **Geliştirme Hızı:** Mesaj aracılarıyla geliştirme ortamları kurmaya gerek yoktur, bu da yerel geliştirmeyi ve CI/CD süreçlerini basitleştirir.
 
-- **Use Case Alignment**: Designed for scenarios where notifications are consumed within the same application instance or where the benefits of distributed messaging (durability across application restarts, multi-instance coordination) are not required.
+- **Kullanım Durumu Uyumu:** Bildirimlerin aynı uygulama örneği içinde tüketildiği veya dağıtık mesajlaşmanın faydalarının (uygulama yeniden başlatmalarında kalıcılık, çoklu örnek koordinasyonu) gerekli olmadığı senaryolar için tasarlanmıştır.
 
-## 4. Core Components
+## 4. Temel Bileşenler
 
-At a high level, the engine consists of the following components:
+Üst düzeyde, motor aşağıdaki bileşenlerden oluşur:
 
-- **Notification Queue**: A thread-safe `BlockingQueue` implementation that serves as the buffer between producers and consumers, providing thread-safe enqueue and dequeue operations with optional capacity limits.
+- **Bildirim Kuyruğu (Notification Queue):** İsteğe bağlı kapasite sınırlarıyla thread-safe (iş parçacığı güvenli) ekleme ve çıkarma işlemleri sağlayan, üreticiler ve tüketiciler arasında tampon görevi gören thread-safe bir `BlockingQueue` uygulamasıdır.
 
-- **Notification Producer Service**: A service layer that accepts notification requests from application code and enqueues them into the blocking queue. This component handles notification creation, validation, and queue submission.
+- **Bildirim Üretici Servisi (Notification Producer Service):** Uygulama kodundan gelen bildirim isteklerini kabul eden ve bunları bloklayan kuyruğa ekleyen bir servis katmanıdır. Bu bileşen bildirim oluşturma, doğrulama ve kuyruğa gönderme işlemlerini yönetir.
 
-- **Notification Consumer Workers**: Background thread workers (typically managed via Spring's `@Async` or `ExecutorService`) that continuously poll the queue for notifications and process them. Multiple consumer threads can operate in parallel to increase throughput.
+- **Bildirim Tüketici İşçileri (Notification Consumer Workers):** Sürekli olarak kuyruğu yoklayan ve bildirimleri işleyen arka plan thread işçileridir (genellikle Spring'in `@Async` veya `ExecutorService` aracılığıyla yönetilir). İş hacmini artırmak için birden fazla tüketici thread'i paralel olarak çalışabilir.
 
-- **Notification Processor**: The core business logic component responsible for executing the actual notification delivery (e.g., calling email services, SMS gateways, push notification APIs). This is where notification-specific processing and retry logic reside.
+- **Bildirim İşleyicisi (Notification Processor):** Gerçek bildirim teslimatını (örn. e-posta servislerini, SMS ağ geçitlerini, push bildirim API'lerini çağırmak) yürütmekten sorumlu temel iş mantığı bileşenidir. Bildirime özel işleme ve yeniden deneme mantığı burada bulunur.
 
-- **Configuration Management**: Spring Boot configuration for queue capacity, thread pool sizing, consumer thread count, and other tuning parameters, allowing the engine to be customized based on workload requirements.
+- **Yapılandırma Yönetimi:** Kuyruk kapasitesi, thread havuzu boyutlandırması, tüketici thread sayısı ve diğer ayar parametreleri için Spring Boot yapılandırması; motorun iş yükü gereksinimlerine göre özelleştirilmesine olanak tanır.
 
-- **Error Handling & Monitoring**: Mechanisms for handling processing failures, logging notification lifecycle events, and optionally integrating with monitoring systems to track queue depth, processing rates, and error rates.
+- **Hata Yönetimi ve İzleme:** İşleme hatalarını yönetme, bildirim yaşam döngüsü olaylarını loglama (günlüğe kaydetme) ve isteğe bağlı olarak kuyruk derinliğini, işleme oranlarını ve hata oranlarını takip etmek için izleme sistemleriyle entegrasyon mekanizmaları.
 
-## 6. NotificationEvent Domain Model
+## 6. NotificationEvent Domain Modeli
 
-The `NotificationEvent` is the core domain model that represents a notification message as it flows through the async notification system. It is a simple data transfer object (DTO) containing only fields and enums, with no business logic.
+`NotificationEvent`, asenkron bildirim sistemi boyunca akan bir bildirim mesajını temsil eden temel domain modelidir. Sadece alanları ve enumları içeren, iş mantığı barındırmayan basit bir veri transfer nesnesidir (DTO).
 
-### Field Definitions
+### Alan Tanımları
 
-The `NotificationEvent` model consists of the following fields:
+`NotificationEvent` modeli aşağıdaki alanlardan oluşur:
 
-- **`id` (UUID)**: A unique identifier for each notification event. This field enables tracking, logging, debugging, and correlation of notification lifecycle events across the system. Each notification receives a unique ID at creation time, allowing traceability from production through consumption.
+- **`id` (UUID):** Her bildirim olayı için benzersiz bir tanımlayıcı. Bu alan, sistem genelinde bildirim yaşam döngüsü olaylarının izlenmesini, loglanmasını, hata ayıklanmasını ve ilişkilendirilmesini sağlar. Her bildirime oluşturulma anında benzersiz bir kimlik verilir, bu da üretimden tüketime kadar izlenebilirlik sağlar.
 
-- **`notificationType` (NotificationType enum)**: Specifies the channel through which the notification should be delivered. The enum supports multiple notification channels: `EMAIL`, `SMS`, `PUSH`, `IN_APP`, and `WEBHOOK`. This field determines which processor implementation will handle the notification, enabling the system to route notifications to appropriate delivery mechanisms.
+- **`notificationType` (NotificationType enum):** Bildirimin hangi kanal üzerinden teslim edileceğini belirtir. Enum birden fazla bildirim kanalını destekler: `EMAIL`, `SMS`, `PUSH`, `IN_APP` ve `WEBHOOK`. Bu alan, hangi işlemci uygulamasının bildirimi ele alacağını belirler ve sistemin bildirimleri uygun teslimat mekanizmalarına yönlendirmesini sağlar.
 
-- **`recipient` (String)**: The destination address or identifier for the notification. This can represent an email address, phone number, user ID, device token, webhook URL, or any other recipient identifier depending on the `notificationType`. This field provides the target destination for notification delivery.
+- **`recipient` (String):** Bildirim için hedef adres veya tanımlayıcı. `notificationType`'a bağlı olarak bir e-posta adresi, telefon numarası, kullanıcı kimliği, cihaz token'ı, webhook URL'si veya başka bir alıcı tanımlayıcısını temsil edebilir. Bu alan, bildirim teslimi için hedef varış noktasını sağlar.
 
-- **`subject` (String)**: The title or subject line of the notification. Primarily used for email notifications and some push notification systems that support titles. This field enhances notification clarity and helps recipients quickly understand the notification's purpose.
+- **`subject` (String):** Bildirimin başlığı veya konu satırı. Öncelikle e-posta bildirimleri ve başlıkları destekleyen bazı push bildirim sistemleri için kullanılır. Bu alan bildirim netliğini artırır ve alıcıların bildirimin amacını hızlıca anlamasına yardımcı olur.
 
-- **`body` (String)**: The main content or message body of the notification. This contains the actual notification message text that will be displayed or sent to the recipient. This field carries the core informational payload of the notification.
+- **`body` (String):** Bildirimin ana içeriği veya mesaj gövdesi. Alıcıya gösterilecek veya gönderilecek gerçek bildirim metnini içerir. Bu alan, bildirimin temel bilgi yükünü taşır.
 
-- **`priority` (NotificationPriority enum)**: Indicates the importance level of the notification, with values `LOW`, `NORMAL`, `HIGH`, and `URGENT`. While the engine processes notifications in FIFO order, this field can be used for future prioritization features, monitoring, logging, and business logic decisions about notification handling.
+- **`priority` (NotificationPriority enum):** Bildirimin önem seviyesini belirtir; değerler `LOW` (DÜŞÜK), `NORMAL`, `HIGH` (YÜKSEK) ve `URGENT` (ACİL)'dir. Motor bildirimleri FIFO (İlk Giren İlk Çıkar) sırasına göre işlese de, bu alan gelecekteki önceliklendirme özellikleri, izleme, loglama ve bildirim yönetimiyle ilgili iş kararları için kullanılabilir.
 
-- **`createdAt` (LocalDateTime)**: Timestamp indicating when the notification event was created. This field enables latency tracking, monitoring notification age in the queue, debugging timing issues, and implementing time-based business rules (e.g., notifications that are too old may be discarded).
+- **`createdAt` (LocalDateTime):** Bildirim olayının oluşturulduğu zamanı belirten zaman damgası. Bu alan gecikme takibi, kuyruktaki bildirim yaşının izlenmesi, zamanlama sorunlarının ayıklanması ve zamana dayalı iş kurallarının (örn. çok eski bildirimlerin atılması) uygulanmasını sağlar.
 
-- **`metadata` (Map<String, Object>)**: A flexible map for storing additional context-specific data that doesn't fit into the standard fields. This can include template variables, custom headers, retry counts, correlation IDs, user preferences, or any other extensible data needed by processors or business logic. This field provides extensibility without modifying the core model structure.
+- **`metadata` (Map<String, Object>):** Standart alanlara sığmayan bağlama özgü ek verileri saklamak için esnek bir harita (map). Bu, şablon değişkenlerini, özel başlıkları, yeniden deneme sayılarını, korelasyon kimliklerini, kullanıcı tercihlerini veya işlemciler ya da iş mantığı tarafından ihtiyaç duyulan diğer genişletilebilir verileri içerebilir. Bu alan, temel model yapısını değiştirmeden genişletilebilirlik sağlar.
 
-### System Flow
+### Sistem Akışı
 
-The `NotificationEvent` flows through the notification engine in the following stages:
+`NotificationEvent` bildirim motoru içinde şu aşamalardan geçer:
 
-1. **Creation**: Application code creates a `NotificationEvent` instance with all required fields populated (id, notificationType, recipient, subject, body, priority, createdAt, and optional metadata). The event is instantiated by the producer layer, typically triggered by business events (user registration, order confirmation, system alerts, etc.).
+1. **Oluşturma (Creation):** Uygulama kodu, gerekli tüm alanları (id, notificationType, recipient, subject, body, priority, createdAt ve isteğe bağlı metadata) doldurulmuş bir `NotificationEvent` örneği oluşturur. Olay, genellikle iş olayları (kullanıcı kaydı, sipariş onayı, sistem uyarıları vb.) tarafından tetiklenen üretici katmanı tarafından başlatılır.
 
-2. **Enqueue**: The populated `NotificationEvent` is submitted to the `NotificationProducerService`, which validates the event (if validation logic exists) and enqueues it into the `BlockingQueue<NotificationEvent>`. At this point, the event enters the async processing pipeline, and control returns immediately to the calling code.
+2. **Kuyruğa Ekleme (Enqueue):** Doldurulan `NotificationEvent`, olayı doğrulayan (eğer doğrulama mantığı varsa) ve `BlockingQueue<NotificationEvent>` içine ekleyen `NotificationProducerService`'e gönderilir. Bu noktada olay asenkron işleme hattına girer ve kontrol hemen çağıran koda geri döner.
 
-3. **Queue Storage**: The event waits in the in-memory `BlockingQueue` until a consumer thread becomes available. The queue provides thread-safe storage and ensures that events are held until processing begins. Multiple events can be queued simultaneously, with the queue size controlled by configuration.
+3. **Kuyruk Depolama (Queue Storage):** Olay, bir tüketici thread'i müsait olana kadar bellek içi `BlockingQueue` içinde bekler. Kuyruk, thread-safe depolama sağlar ve işlemler başlayana kadar olayların tutulmasını garanti eder. Kuyruk boyutu yapılandırma ile kontrol edilerek birden fazla olay aynı anda kuyruklanabilir.
 
-4. **Dequeue**: A `NotificationConsumerWorker` thread polls the queue and retrieves a `NotificationEvent` when available. This blocking operation ensures that consumer threads wait efficiently when the queue is empty, consuming no CPU resources until events arrive.
+4. **Kuyruktan Çıkarma (Dequeue):** Bir `NotificationConsumerWorker` thread'i kuyruğu yoklar ve müsait olduğunda bir `NotificationEvent` alır. Bu bloklayan işlem, kuyruk boş olduğunda tüketici thread'lerinin verimli bir şekilde beklemesini ve olaylar gelene kadar CPU kaynağı tüketmemesini sağlar.
 
-5. **Processing**: The consumer passes the `NotificationEvent` to the appropriate `NotificationProcessor` based on the `notificationType` field. The processor extracts relevant fields (recipient, subject, body, metadata) and executes the actual notification delivery (e.g., calling an email service API, SMS gateway, or push notification service).
+5. **İşleme (Processing):** Tüketici, `NotificationEvent`'i `notificationType` alanına göre uygun `NotificationProcessor`'a iletir. İşlemci ilgili alanları (recipient, subject, body, metadata) çıkarır ve gerçek bildirim teslimatını (örn. bir e-posta servisi API'sini, SMS ağ geçidini veya push bildirim servisini çağırmak) gerçekleştirir.
 
-6. **Completion/Discard**: After processing (successful or failed), the `NotificationEvent` is no longer referenced and becomes eligible for garbage collection. The in-memory nature of the system means events are not persisted, and their lifecycle ends after consumption.
+6. **Tamamlama/Atma (Completion/Discard):** İşlemeden sonra (başarılı veya başarısız), `NotificationEvent` artık referans edilmez ve Çöp Toplayıcı (Garbage Collection) için uygun hale gelir. Sistemin bellek içi doğası gereği, olaylar kalıcı olarak saklanmaz ve yaşam döngüleri tüketimden sonra sona erer.
 
-Throughout this flow, the `NotificationEvent` remains immutable from the perspective of the queue system—it is created once, passed through the queue, and consumed once. Any modifications or enrichments would occur in the producer or processor layers, not within the queue infrastructure itself.
+Bu akış boyunca, `NotificationEvent` kuyruk sistemi perspektifinden değişmez (immutable) kalır—bir kez oluşturulur, kuyruktan geçirilir ve bir kez tüketilir. Herhangi bir değişiklik veya zenginleştirme kuyruk altyapısının kendisinde değil, üretici veya işlemci katmanlarında gerçekleşir.
 
-## 7. In-Memory Queue Configuration
+## 7. Bellek İçi Kuyruk Yapılandırması
 
-The notification engine uses a bounded `BlockingQueue<NotificationEvent>` implemented via `LinkedBlockingQueue` as the core data structure for in-memory notification buffering. This configuration provides the foundation for asynchronous notification processing.
+Bildirim motoru, bellek içi bildirim tamponlaması için temel veri yapısı olarak `LinkedBlockingQueue` aracılığıyla uygulanan sınırlı (bounded) bir `BlockingQueue<NotificationEvent>` kullanır. Bu yapılandırma, asenkron bildirim işlemenin temelini oluşturur.
 
-### Why Bounded Queue?
+### Neden Sınırlı (Bounded) Kuyruk?
 
-A bounded queue (with a fixed maximum capacity) is chosen over an unbounded queue for several critical reasons:
+Sınırsız bir kuyruk yerine sınırlı bir kuyruk (sabit maksimum kapasiteye sahip), birkaç kritik nedenden dolayı tercih edilmiştir:
 
-- **Memory Protection**: Prevents unbounded memory growth that could lead to `OutOfMemoryError` when notification production outpaces consumption. The fixed capacity provides a predictable upper bound on memory usage for queued notifications.
+- **Bellek Koruması:** Bildirim üretiminin tüketimi geçtiği durumlarda `OutOfMemoryError` hatasına yol açabilecek sınırsız bellek büyümesini önler. Sabit kapasite, kuyruklanmış bildirimler için bellek kullanımında öngörülebilir bir üst sınır sağlar.
 
-- **Backpressure Mechanism**: When the queue reaches its capacity, producer threads attempting to enqueue notifications will block, naturally applying backpressure. This prevents producers from overwhelming the system and gives consumers time to catch up, maintaining system stability.
+- **Geri Basınç (Backpressure) Mekanizması:** Kuyruk kapasitesine ulaştığında, bildirim eklemeye çalışan üretici thread'ler bloklanır ve doğal bir geri basınç uygular. Bu, üreticilerin sistemi bunaltmasını önler ve tüketicilere yetişmeleri için zaman tanıyarak sistem kararlılığını korur.
 
-- **Resource Awareness**: Forces system designers to consider queue sizing relative to expected workload and processing capacity, promoting conscious resource planning and capacity management.
+- **Kaynak Farkındalığı:** Sistem tasarımcılarını, beklenen iş yükü ve işleme kapasitesine göre kuyruk boyutlandırmasını düşünmeye zorlar, bu da bilinçli kaynak planlamasını ve kapasite yönetimini teşvik eder.
 
-- **Fail-Fast Behavior**: By blocking producers when the queue is full (rather than allowing unbounded growth), the system exposes capacity issues early, making problems visible rather than silently consuming memory until exhaustion.
+- **Hızlı Hata (Fail-Fast) Davranışı:** Kuyruk dolduğunda (sınırsız büyüme yerine) üreticileri bloklayarak, sistem kapasite sorunlarını erkenden ortaya çıkarır ve sorunları sessizce bellek tüketmek yerine görünür hale getirir.
 
-- **Performance Optimization**: Bounded queues with appropriate sizing can improve throughput by maintaining optimal queue depth—too small causes excessive blocking, too large increases memory overhead without benefit. A well-sized bounded queue strikes a balance between producer and consumer efficiency.
+- **Performans Optimizasyonu:** Uygun boyuttaki sınırlı kuyruklar, optimal kuyruk derinliğini koruyarak iş hacmini artırabilir—çok küçük olması aşırı bloklamaya neden olur, çok büyük olması fayda sağlamadan bellek yükünü artırır. İyi boyutlandırılmış bir sınırlı kuyruk, üretici ve tüketici verimliliği arasında bir denge kurar.
 
-### Queue Lifecycle
+### Kuyruk Yaşam Döngüsü
 
-The queue lifecycle follows these stages:
+Kuyruk yaşam döngüsü şu aşamaları izler:
 
-1. **Initialization**: During Spring application context startup, the `NotificationQueueConfig` configuration class creates a `LinkedBlockingQueue<NotificationEvent>` instance with the configured capacity (default: 1000). The queue is registered as a Spring bean, making it available for dependency injection throughout the application.
+1. **Başlatma:** Spring uygulama bağlamı (context) başlatılırken, `NotificationQueueConfig` yapılandırma sınıfı, yapılandırılmış kapasiteyle (varsayılan: 1000) bir `LinkedBlockingQueue<NotificationEvent>` örneği oluşturur. Kuyruk bir Spring bean'i olarak kaydedilir ve uygulama genelinde bağımlılık enjeksiyonu için kullanılabilir hale gelir.
 
-2. **Active Operation**: Once initialized, the queue operates continuously throughout the application's lifetime. Producers enqueue `NotificationEvent` objects, and consumers dequeue them for processing. The queue maintains a FIFO (First-In-First-Out) ordering of notifications.
+2. **Aktif İşleyiş:** Başlatıldıktan sonra kuyruk, uygulamanın ömrü boyunca sürekli çalışır. Üreticiler `NotificationEvent` nesnelerini kuyruğa ekler ve tüketiciler bunları işlemek için kuyruktan çıkarır. Kuyruk, bildirimlerin FIFO (İlk Giren İlk Çıkar) sırasını korur.
 
-3. **Runtime State**: The queue can exist in three states:
-   - **Empty**: No notifications are queued; consumers will block when attempting to dequeue.
-   - **Partially Filled**: Contains some notifications but has remaining capacity; both producers and consumers can operate without blocking (assuming concurrent access).
-   - **Full**: Reached maximum capacity; producers will block on enqueue operations until space becomes available.
+3. **Çalışma Zamanı Durumu:** Kuyruk üç durumda olabilir:
+    - **Boş:** Kuyruklanmış bildirim yoktur; tüketiciler kuyruktan çıkarma işlemi yapmaya çalıştığında bloklanır.
+    - **Kısmen Dolu:** Bazı bildirimler içerir ancak kalan kapasitesi vardır; hem üreticiler hem de tüketiciler (eşzamanlı erişim varsayılarak) bloklanmadan çalışabilir.
+    - **Dolu:** Maksimum kapasiteye ulaşılmıştır; üreticiler yer açılana kadar ekleme işlemlerinde bloklanır.
 
-4. **Shutdown**: When the application shuts down, the queue instance is discarded along with any remaining queued notifications. There is no persistence or graceful shutdown mechanism—all queued notifications are lost during application termination.
+4. **Kapatma:** Uygulama kapandığında, kuyruk örneği ve kalan kuyruklanmış bildirimler atılır. Kalıcılık veya zarif bir kapatma mekanizması yoktur—tüm kuyruklanmış bildirimler uygulama sonlandırıldığında kaybolur.
 
-### What Happens When Queue is Full?
+### Kuyruk Dolduğunda Ne Olur?
 
-When the queue reaches its maximum capacity and a producer attempts to enqueue a notification, the behavior depends on the operation used:
+Kuyruk maksimum kapasitesine ulaştığında ve bir üretici bildirim eklemeye çalıştığında, davranış kullanılan operasyona bağlıdır:
 
-- **Blocking Operations (`put()`)**: The producer thread blocks indefinitely until space becomes available in the queue. This is the default behavior that provides natural backpressure—producers wait, consuming no CPU resources, until a consumer removes a notification and frees space.
+- **Bloklayan İşlemler (`put()`):** Üretici thread, kuyrukta yer açılana kadar süresiz olarak bloklanır. Bu, doğal geri basınç sağlayan varsayılan davranıştır—üreticiler, bir tüketici bildirim alıp yer açana kadar CPU kaynağı tüketmeden bekler.
 
-- **Non-Blocking Operations (`offer()`)**: If producers use `offer()` instead of `put()`, the operation returns `false` immediately when the queue is full, allowing producers to implement alternative strategies (e.g., logging, metrics, fallback handling, or retry logic) rather than blocking.
+- **Bloklamayan İşlemler (`offer()`):** Üreticiler `put()` yerine `offer()` kullanırsa, kuyruk dolu olduğunda işlem hemen `false` döndürür; bu da üreticilerin bloklanmak yerine alternatif stratejiler (örn. loglama, metrikler, yedek işleme veya yeniden deneme mantığı) uygulamasına izin verir.
 
-- **Timeout Operations (`offer(timeout)`)**: Producers can use `offer()` with a timeout, which will block for the specified duration. If space becomes available within the timeout, the notification is enqueued and `true` is returned. If the timeout expires, `false` is returned, allowing producers to handle the failure scenario.
+- **Zaman Aşımı İşlemleri (`offer(timeout)`):** Üreticiler, belirtilen süre boyunca bloklanacak şekilde zaman aşımlı `offer()` kullanabilir. Zaman aşımı süresi içinde yer açılırsa bildirim kuyruğa eklenir ve `true` döner. Zaman aşımı dolarsa `false` döner ve üreticinin hata senaryosunu yönetmesine izin verilir.
 
-The choice of operation (`put()` vs `offer()`) determines how backpressure is handled. Blocking operations (`put()`) ensure no notifications are lost but may slow down producers, while non-blocking operations allow producers to continue but may require explicit handling of rejected notifications.
+İşlem seçimi (`put()` vs `offer()`), geri basıncın nasıl yönetileceğini belirler. Bloklayan işlemler (`put()`) hiçbir bildirimin kaybolmamasını sağlar ancak üreticileri yavaşlatabilir; bloklamayan işlemler ise üreticilerin devam etmesine izin verir ancak reddedilen bildirimlerin açıkça yönetilmesini gerektirebilir.
 
-### Thread-Safety Guarantees
+### İş Parçacığı Güvenliği (Thread-Safety) Garantileri
 
-The `LinkedBlockingQueue` implementation provides strong thread-safety guarantees:
+`LinkedBlockingQueue` uygulaması güçlü thread-safety garantileri sağlar:
 
-- **Concurrent Access**: Multiple producer threads can safely enqueue notifications simultaneously without synchronization issues. Similarly, multiple consumer threads can safely dequeue notifications concurrently. The queue internally handles all synchronization.
+- **Eşzamanlı Erişim:** Birden fazla üretici thread, senkronizasyon sorunu yaşamadan aynı anda güvenli bir şekilde bildirim ekleyebilir. Benzer şekilde, birden fazla tüketici thread eşzamanlı olarak bildirimleri kuyruktan çıkarabilir. Kuyruk tüm senkronizasyonu dahili olarak yönetir.
 
-- **Atomic Operations**: All queue operations (enqueue, dequeue, size checks) are atomic. A single notification cannot be partially enqueued or dequeued, preventing corruption or data inconsistency.
+- **Atomik İşlemler:** Tüm kuyruk işlemleri (ekleme, çıkarma, boyut kontrolleri) atomiktir. Tek bir bildirim kısmen eklenemez veya çıkarılamaz, bu da bozulmayı veya veri tutarsızlığını önler.
 
-- **Visibility Guarantees**: The queue uses `volatile` variables and `java.util.concurrent.locks` internally to ensure that changes made by one thread are immediately visible to other threads, satisfying Java Memory Model requirements for concurrent access.
+- **Görünürlük Garantileri:** Kuyruk, bir thread tarafından yapılan değişikliklerin diğer thread'ler tarafından hemen görülebilmesini sağlamak için dahili olarak `volatile` değişkenler ve `java.util.concurrent.locks` kullanır, bu da eşzamanlı erişim için Java Bellek Modeli gereksinimlerini karşılar.
 
-- **Happens-Before Relationships**: Enqueue and dequeue operations establish proper happens-before relationships, ensuring that if a producer enqueues a notification before a consumer starts dequeuing, the consumer will see that notification.
+- **Önce-Gerçekleşir (Happens-Before) İlişkileri:** Ekleme ve çıkarma işlemleri, uygun önce-gerçekleşir ilişkileri kurar; bu, bir üreticinin bir tüketici çıkarmaya başlamadan önce bildirim eklemesi durumunda, tüketicinin o bildirimi göreceğini garanti eder.
 
-- **No External Synchronization Required**: Application code using the queue does not need to add external synchronization (e.g., `synchronized` blocks, explicit locks) when performing queue operations. The queue handles all thread-safety internally.
+- **Harici Senkronizasyon Gerekmez:** Kuyruğu kullanan uygulama kodunun kuyruk işlemleri yaparken harici senkronizasyon (örn. `synchronized` blokları, açık kilitler) eklemesine gerek yoktur. Kuyruk tüm thread güvenliğini dahili olarak halleder.
 
-- **Lock-Free Where Possible**: `LinkedBlockingQueue` uses separate locks for enqueue and dequeue operations (two-lock queue algorithm), allowing producers and consumers to operate in parallel without contention, improving throughput in high-concurrency scenarios.
+- **Mümkün Olduğunda Kilit-Serbest (Lock-Free):** `LinkedBlockingQueue`, ekleme ve çıkarma işlemleri için ayrı kilitler kullanır (iki kilitli kuyruk algoritması), bu da üreticilerin ve tüketicilerin çekişme olmadan paralel çalışmasına izin vererek yüksek eşzamanlılık senaryolarında iş hacmini artırır.
 
-These guarantees ensure that the queue can be safely used in a multi-threaded environment where multiple producers and consumers operate concurrently without race conditions, data corruption, or other concurrency-related issues.
+Bu garantiler, kuyruğun birden fazla üretici ve tüketicinin eşzamanlı olarak çalıştığı çok thread'li bir ortamda yarış durumları (race conditions), veri bozulması veya diğer eşzamanlılık sorunları olmadan güvenli bir şekilde kullanılabilmesini sağlar.
 
-## 8. NotificationProducer Service
+## 8. NotificationProducer Service (Bildirim Üretici Servisi)
 
-The `NotificationProducer` service is the entry point for submitting notifications into the async processing pipeline. It accepts `NotificationEvent` objects and enqueues them into the `BlockingQueue` for later consumption by consumer workers. The producer's responsibility is intentionally limited to queueing operations only—it does not process, validate, or deliver notifications.
+`NotificationProducer` servisi, asenkron işleme hattına bildirim göndermek için giriş noktasıdır. `NotificationEvent` nesnelerini kabul eder ve bunları daha sonra tüketici işçiler tarafından tüketilmek üzere `BlockingQueue` içine ekler. Üreticinin sorumluluğu kasıtlı olarak sadece kuyruklama işlemleriyle sınırlandırılmıştır—bildirimleri işlemez, doğrulamaz veya teslim etmez.
 
-### Why Producer Must Be Lightweight
+### Üretici Neden Hafif Olmalı?
 
-The producer service must remain lightweight for several critical reasons:
+Üretici servisi birkaç kritik nedenden dolayı hafif kalmalıdır:
 
-- **Non-Blocking API Design**: The producer is typically called from user-facing code paths (e.g., REST controllers, event handlers, scheduled tasks). A lightweight producer that quickly enqueues notifications and returns ensures that these code paths remain responsive and do not block waiting for slow notification operations.
+- **Bloklamayan API Tasarımı:** Üretici genellikle kullanıcıya dönük kod yollarından (örn. REST denetleyicileri, olay işleyicileri, zamanlanmış görevler) çağrılır. Bildirimleri hızlıca kuyruğa ekleyen ve dönen hafif bir üretici, bu kod yollarının tepkisel kalmasını ve yavaş bildirim işlemleri için beklememesini sağlar.
 
-- **Scalability**: A lightweight producer can handle high throughput of notification submissions. If the producer were heavy (e.g., performing validation, transformation, or external service calls), it would become a bottleneck, limiting the system's ability to accept notifications at a high rate.
+- **Ölçeklenebilirlik:** Hafif bir üretici, yüksek hacimli bildirim gönderimlerini yönetebilir. Eğer üretici ağır olsaydı (örn. doğrulama, dönüştürme veya harici servis çağrıları yapsaydı), bir darboğaz haline gelir ve sistemin yüksek oranda bildirim kabul etme yeteneğini sınırlardı.
 
-- **Separation of Concerns**: By keeping the producer simple and focused solely on queueing, the system maintains clear separation between notification submission (producer's responsibility) and notification processing (consumer's responsibility). This separation allows each component to be optimized and scaled independently.
+- **İlgi Alanlarının Ayrılması:** Üreticiyi basit tutarak ve yalnızca kuyruklamaya odaklayarak, sistem bildirim gönderimi (üreticinin sorumluluğu) ile bildirim işleme (tüketicinin sorumluluğu) arasında net bir ayrım sağlar. Bu ayrım, her bileşenin bağımsız olarak optimize edilmesine ve ölçeklenmesine olanak tanır.
 
-- **Queue Backpressure Handling**: When the queue is full, the producer will block (if using `put()` operation). A lightweight producer minimizes the impact of this blocking—the thread is simply waiting, consuming minimal resources. A heavy producer with additional processing would waste more resources during blocking periods.
+- **Kuyruk Geri Basınç Yönetimi:** Kuyruk dolduğunda üretici bloklanır (`put()` işlemi kullanılıyorsa). Hafif bir üretici, bu bloklamanın etkisini en aza indirir—thread sadece bekler, minimal kaynak tüketir. Ek işlemler yapan ağır bir üretici, bloklama süreleri boyunca daha fazla kaynak israf ederdi.
 
-- **Low Latency**: User-facing operations that trigger notifications (e.g., user registration, order placement) should complete quickly. A lightweight producer ensures that the notification submission step adds minimal latency to these operations.
+- **Düşük Gecikme:** Bildirimleri tetikleyen kullanıcıya dönük işlemler (örn. kullanıcı kaydı, sipariş verme) hızlı bir şekilde tamamlanmalıdır. Hafif bir üretici, bildirim gönderme adımının bu işlemlere minimal gecikme eklemesini sağlar.
 
-- **Resource Efficiency**: Heavy processing in the producer would consume resources (CPU, memory, thread time) that should be reserved for consumers. By keeping producers lightweight, resources are allocated where they matter most—in processing and delivering notifications.
+- **Kaynak Verimliliği:** Üreticideki ağır işlemler, tüketiciler için ayrılması gereken kaynakları (CPU, bellek, thread zamanı) tüketirdi. Üreticileri hafif tutarak, kaynaklar en önemli oldukları yere—bildirimlerin işlenmesi ve teslim edilmesine—tahsis edilir.
 
-### Error Handling Strategy
+### Hata Yönetimi Stratejisi
 
-The `NotificationProducer` implements a focused error handling strategy:
+`NotificationProducer` odaklanmış bir hata yönetimi stratejisi uygular:
 
-- **Null Validation**: The producer validates that the `NotificationEvent` is not null before attempting to enqueue it, throwing an `IllegalArgumentException` immediately. This fails-fast approach prevents null events from propagating through the system and provides clear feedback to callers.
+- **Null Doğrulama:** Üretici, kuyruğa eklemeye çalışmadan önce `NotificationEvent`'in null olmadığını doğrular ve hemen bir `IllegalArgumentException` fırlatır. Bu hızlı hata (fail-fast) yaklaşımı, null olayların sisteme yayılmasını önler ve çağıranlara net geri bildirim sağlar.
 
-- **InterruptedException Handling**: When using the blocking `put()` operation, the producer properly handles `InterruptedException` by:
-  - Logging the interruption for debugging and monitoring
-  - Restoring the interrupt status on the thread (`Thread.currentThread().interrupt()`) to preserve the interrupted state for upper layers
-  - Re-throwing the exception to allow callers to handle the interruption appropriately
-  
-  This ensures that thread interruption signals are not lost and can be handled by upstream code (e.g., application shutdown scenarios).
+- **InterruptedException Yönetimi:** Bloklayan `put()` işlemini kullanırken, üretici `InterruptedException`'ı şu şekilde düzgün bir şekilde yönetir:
+    - Hata ayıklama ve izleme için kesilmeyi loglar.
+    - Üst katmanlar için kesilme durumunu korumak adına thread üzerindeki kesme durumunu geri yükler (`Thread.currentThread().interrupt()`).
+    - Çağıranların kesilmeyi uygun şekilde yönetmesine izin vermek için istisnayı (exception) yeniden fırlatır.
+    
+    Bu, thread kesilme sinyallerinin kaybolmamasını ve yukarı akış kodu (örn. uygulama kapatma senaryoları) tarafından yönetilebilmesini sağlar.
 
-- **Unexpected Exception Wrapping**: For any other unexpected exceptions during enqueueing (which should be rare given the simplicity of the operation), the producer:
-  - Logs the error with contextual information (event ID) for troubleshooting
-  - Wraps the exception in a `RuntimeException` with a descriptive message
-  - Allows the exception to propagate to callers for appropriate handling
+- **Beklenmeyen İstisna Sarma:** Kuyruklama sırasındaki diğer beklenmeyen istisnalar için (işlemin basitliği göz önüne alındığında bu nadir olmalıdır), üretici:
+    - Sorun giderme için hatayı bağlamsal bilgiyle (olay ID'si) loglar.
+    - İstisnayı açıklayıcı bir mesajla `RuntimeException` içine sarar.
+    - İstisnanın uygun şekilde yönetilmesi için çağıranlara yayılmasına izin verir.
 
-- **No Retry Logic**: The producer does not implement retry logic for failed enqueue operations. Retries should be handled at a higher level (e.g., by the caller or through application-level retry mechanisms) if needed. This keeps the producer simple and avoids coupling it to retry policies.
+- **Yeniden Deneme Mantığı Yok:** Üretici, başarısız kuyruklama işlemleri için yeniden deneme mantığı uygulamaz. Yeniden denemeler, gerekirse daha üst bir seviyede (örn. çağıran tarafından veya uygulama seviyesindeki yeniden deneme mekanizmalarıyla) yönetilmelidir. Bu, üreticiyi basit tutar ve yeniden deneme politikalarına bağlanmasını önler.
 
-- **Logging Strategy**: The producer uses appropriate log levels:
-  - `DEBUG` for successful enqueueing (to avoid log noise in production)
-  - `ERROR` for exceptions (to ensure failures are visible and actionable)
+- **Loglama Stratejisi:** Üretici uygun log seviyelerini kullanır:
+    - Başarılı kuyruklama için `DEBUG` (prodüksiyonda log kirliliğini önlemek için).
+    - İstisnalar için `ERROR` (hataların görünür ve eyleme geçirilebilir olmasını sağlamak için).
 
-This error handling strategy balances simplicity with robustness, ensuring that errors are properly surfaced without adding complexity to the producer's core responsibility.
+Bu hata yönetimi stratejisi, hataların üreticinin temel sorumluluğuna karmaşıklık eklemeden düzgün bir şekilde yüzeye çıkarılmasını sağlayarak basitlik ile sağlamlığı dengeler.
 
-### Why This Layer Should Not Know Consumers
+### Neden Bu Katman Tüketicileri Bilmemeli?
 
-The `NotificationProducer` is deliberately designed to be unaware of consumers for several architectural reasons:
+`NotificationProducer`, çeşitli mimari nedenlerle tüketicilerden habersiz olacak şekilde kasıtlı olarak tasarlanmıştır:
 
-- **Loose Coupling**: By not knowing about consumers, the producer remains decoupled from consumption logic. This allows consumers to be added, removed, or modified without requiring changes to the producer code, promoting system flexibility and maintainability.
+- **Gevşek Bağlılık (Loose Coupling):** Tüketicileri bilmeyerek, üretici tüketim mantığından ayrılmış kalır. Bu, tüketicilerin üretici kodunda değişiklik yapılmasını gerektirmeden eklenmesine, kaldırılmasına veya değiştirilmesine olanak tanır, sistem esnekliğini ve sürdürülebilirliğini artırır.
 
-- **Single Responsibility**: The producer's single responsibility is accepting and enqueueing notifications. Adding knowledge of consumers would introduce additional concerns (e.g., consumer availability, processing status, consumer configuration) that belong in other layers of the system.
+- **Tek Sorumluluk:** Üreticinin tek sorumluluğu bildirimleri kabul etmek ve kuyruğa eklemektir. Tüketiciler hakkında bilgi eklemek, sistemin diğer katmanlarına ait olan ek endişeleri (örn. tüketici kullanılabilirliği, işleme durumu, tüketici yapılandırması) beraberinde getirirdi.
 
-- **Queue as Abstraction**: The `BlockingQueue` serves as an abstraction boundary between producers and consumers. Producers interact only with the queue interface, not with consumer implementations. This abstraction allows the system to evolve—consumers can be refactored, replaced, or scaled without affecting producers.
+- **Soyutlama Olarak Kuyruk:** `BlockingQueue`, üreticiler ve tüketiciler arasında bir soyutlama sınırı görevi görür. Üreticiler tüketici uygulamalarıyla değil, sadece kuyruk arayüzüyle etkileşime girer. Bu soyutlama, sistemin evrimleşmesine izin verir—tüketiciler üreticileri etkilemeden yeniden düzenlenebilir, değiştirilebilir veya ölçeklenebilir.
 
-- **Scalability Independence**: Producers and consumers can be scaled independently when they are decoupled. The number of producers can grow based on incoming request volume, while the number of consumers can be adjusted based on processing capacity needs, without either side needing to know about the other.
+- **Ölçeklenebilirlik Bağımsızlığı:** Ayrıştırıldıklarında üreticiler ve tüketiciler bağımsız olarak ölçeklenebilir. Üretici sayısı gelen istek hacmine göre artabilirken, tüketici sayısı işleme kapasitesi ihtiyaçlarına göre ayarlanabilir ve her iki tarafın da diğerini bilmesi gerekmez.
 
-- **Testing Simplicity**: A producer that doesn't know about consumers is easier to test in isolation. Unit tests can focus solely on queueing behavior without needing to mock or configure consumer dependencies, leading to simpler and more maintainable test suites.
+- **Test Basitliği:** Tüketicileri bilmeyen bir üreticiyi izole bir şekilde test etmek daha kolaydır. Birim testleri, tüketici bağımlılıklarını taklit etmeye (mock) veya yapılandırmaya gerek kalmadan yalnızca kuyruklama davranışına odaklanabilir, bu da daha basit ve sürdürülebilir test paketlerine yol açar.
 
-- **Flexibility in Consumer Implementation**: The system can support multiple consumer implementations (e.g., different processors for different notification types, parallel consumers, priority-based consumers) without the producer needing to be aware of these details. The queue handles the routing and buffering, allowing consumers to be implemented and evolved independently.
+- **Tüketici Uygulamasında Esneklik:** Sistem, üreticinin bu detaylardan haberdar olmasına gerek kalmadan birden fazla tüketici uygulamasını (örn. farklı bildirim türleri için farklı işlemciler, paralel tüketiciler, öncelik tabanlı tüketiciler) destekleyebilir. Kuyruk, yönlendirme ve tamponlamayı halleder, tüketicilerin bağımsız olarak uygulanmasına ve geliştirilmesine izin verir.
 
-- **Future Extensibility**: Decoupling producers from consumers allows the system to evolve in ways that would be difficult if they were tightly coupled. For example, the system could later add multiple queues, queue routing logic, or even move to a distributed queue implementation without requiring producer changes.
+- **Gelecekteki Genişletilebilirlik:** Üreticileri tüketicilerden ayırmak, sıkı sıkıya bağlı olsalardı zor olacak şekillerde sistemin evrimleşmesine izin verir. Örneğin, sistem daha sonra birden fazla kuyruk, kuyruk yönlendirme mantığı ekleyebilir veya hatta üretici değişiklikleri gerektirmeden dağıtık bir kuyruk uygulamasına geçebilir.
 
-This design follows the Producer-Consumer pattern's core principle: producers and consumers communicate only through the shared queue, never directly with each other. This principle ensures a clean separation of concerns and promotes a more maintainable and scalable architecture.
+Bu tasarım, Üretici-Tüketici deseninin temel ilkesini takip eder: üreticiler ve tüketiciler birbirleriyle asla doğrudan değil, sadece paylaşılan kuyruk aracılığıyla iletişim kurar. Bu ilke, endişelerin temiz bir şekilde ayrılmasını sağlar ve daha sürdürülebilir ve ölçeklenebilir bir mimariyi teşvik eder.
 
-## 9. NotificationConsumer Worker
+## 9. NotificationConsumer Worker (Bildirim Tüketici İşçisi)
 
-The `NotificationConsumerWorker` is responsible for continuously polling the `BlockingQueue` for notification events and processing them through the `NotificationProcessor`. Multiple consumer worker threads run concurrently in the background, each executing an infinite loop that polls the queue, retrieves events, and processes them asynchronously.
+`NotificationConsumerWorker`, `BlockingQueue`'yu bildirim olayları için sürekli olarak yoklamaktan ve bunları `NotificationProcessor` aracılığıyla işlemekten sorumludur. Birden fazla tüketici işçi thread'i arka planda eşzamanlı olarak çalışır, her biri kuyruğu yoklayan, olayları alan ve bunları asenkron olarak işleyen sonsuz bir döngü yürütür.
 
-### Thread Model
+### İş Parçacığı Modeli (Thread Model)
 
-The consumer worker uses a fixed-size thread pool (`ExecutorService`) to manage multiple consumer threads:
+Tüketici işçisi, birden fazla tüketici thread'ini yönetmek için sabit boyutlu bir thread havuzu (`ExecutorService`) kullanır:
 
-- **Thread Pool Creation**: An `ExecutorService` with a fixed number of threads (configurable via `notification.queue.consumer-threads`, default: 2) is created during initialization. Each thread in the pool runs a separate consumer worker loop.
+- **Thread Havuzu Oluşturma:** Başlatma sırasında sabit sayıda thread'e sahip bir `ExecutorService` (yapılandırılabilir: `notification.queue.consumer-threads`, varsayılan: 2) oluşturulur. Havuzdaki her thread ayrı bir tüketici işçi döngüsü çalıştırır.
 
-- **Worker Thread Naming**: Consumer threads are named "notification-consumer" for easy identification in thread dumps, logging, and debugging. Threads are created as non-daemon threads to ensure they keep the JVM alive and can be properly shut down.
+- **İşçi Thread İsimlendirme:** Tüketici thread'leri, thread dökümlerinde, loglamada ve hata ayıklamada kolay tanımlama için "notification-consumer" olarak adlandırılır. Thread'ler, JVM'i canlı tutmalarını ve düzgün bir şekilde kapatılabilmelerini sağlamak için non-daemon (daemon olmayan) thread'ler olarak oluşturulur.
 
-- **Independent Execution**: Each consumer thread operates independently, polling the queue and processing events concurrently. This parallel processing increases throughput, allowing multiple notifications to be processed simultaneously.
+- **Bağımsız Yürütme:** Her tüketici thread'i bağımsız olarak çalışır, kuyruğu yoklar ve olayları eşzamanlı olarak işler. Bu paralel işleme, birden fazla bildirimin aynı anda işlenmesine izin vererek iş hacmini artırır.
 
-- **Blocking Queue Interaction**: All consumer threads share the same `BlockingQueue` instance. The queue's thread-safe implementation ensures that multiple threads can safely poll the queue concurrently without race conditions or data corruption. When a thread calls `take()`, it blocks until an event is available, efficiently waiting without consuming CPU resources.
+- **Blocking Queue Etkileşimi:** Tüm tüketici thread'leri aynı `BlockingQueue` örneğini paylaşır. Kuyruğun thread-safe uygulaması, birden fazla thread'in yarış koşulları veya veri bozulması olmadan kuyruğu güvenli bir şekilde eşzamanlı olarak yoklayabilmesini sağlar. Bir thread `take()` çağırdığında, bir olay mevcut olana kadar bloklanır ve CPU kaynağı tüketmeden verimli bir şekilde bekler.
 
-- **Thread Lifecycle**: Consumer threads are started during Spring bean initialization (when the `NotificationConsumerWorker` bean is created) and continue running until the application shuts down. The threads are managed by the `ExecutorService`, which handles thread creation, lifecycle, and termination.
+- **Thread Yaşam Döngüsü:** Tüketici thread'leri Spring bean başlatması sırasında (`NotificationConsumerWorker` bean'i oluşturulduğunda) başlatılır ve uygulama kapanana kadar çalışmaya devam eder. Thread'ler, thread oluşturma, yaşam döngüsü ve sonlandırmayı yöneten `ExecutorService` tarafından yönetilir.
 
-- **Resource Allocation**: Each consumer thread consumes minimal resources when waiting (blocked on `take()` operation). CPU usage is only consumed when actively processing notifications. This efficient resource usage allows multiple consumer threads to run without significant overhead.
+- **Kaynak Tahsisi:** Her tüketici thread'i beklerken (`take()` işleminde bloklanmışken) minimal kaynak tüketir. CPU kullanımı yalnızca aktif olarak bildirim işlerken gerçekleşir. Bu verimli kaynak kullanımı, önemli bir ek yük olmadan birden fazla tüketici thread'inin çalışmasına izin verir.
 
-### Why Infinite Loop is Safe Here
+### Sonsuz Döngü Burada Neden Güvenlidir?
 
-The consumer workers use an infinite `while` loop (`while (running.get() && !Thread.currentThread().isInterrupted())`) which is safe and appropriate for this use case:
+Tüketici işçileri, bu kullanım durumu için güvenli ve uygun olan sonsuz bir `while` döngüsü kullanır (`while (running.get() && !Thread.currentThread().isInterrupted())`):
 
-- **Blocking Operations**: The loop contains a blocking operation (`notificationQueue.take()`) that suspends thread execution when the queue is empty. The thread consumes no CPU cycles while blocked, waiting efficiently for events to arrive. The infinite loop is not a busy-wait loop that would consume CPU resources.
+- **Bloklayan İşlemler:** Döngü, kuyruk boş olduğunda thread yürütmesini askıya alan bloklayan bir işlem (`notificationQueue.take()`) içerir. Thread bloklanmışken CPU döngüsü tüketmez, olayların gelmesini verimli bir şekilde bekler. Sonsuz döngü, CPU kaynaklarını tüketecek bir "meşgul bekleme" (busy-wait) döngüsü değildir.
 
-- **Controlled Termination**: The loop is controlled by two conditions:
-  - `running.get()`: An `AtomicBoolean` flag that can be set to `false` during graceful shutdown
-  - `Thread.currentThread().isInterrupted()`: A check for thread interruption, which allows external termination signals (e.g., during application shutdown) to break the loop
+- **Kontrollü Sonlandırma:** Döngü iki koşul tarafından kontrol edilir:
+    - `running.get()`: Zarif kapatma sırasında `false` olarak ayarlanabilen bir `AtomicBoolean` bayrağı.
+    - `Thread.currentThread().isInterrupted()`: Uygulama kapatma sırasında olduğu gibi harici sonlandırma sinyallerinin döngüyü kırmasına izin veren bir thread kesilme kontrolü.
 
-- **Exception Handling**: The loop properly handles `InterruptedException`, which is thrown when the thread is interrupted while blocked on `take()`. When interrupted, the loop breaks, allowing the thread to exit cleanly. This ensures that shutdown signals (interruptions) are properly handled.
+- **İstisna (Exception) Yönetimi:** Döngü, thread `take()` üzerinde bloklanmışken kesildiğinde fırlatılan `InterruptedException`'ı düzgün bir şekilde yönetir. Kesildiğinde döngü kırılır ve thread'in temiz bir şekilde çıkmasına izin verilir. Bu, kapatma sinyallerinin (kesilmelerin) düzgün bir şekilde yönetilmesini sağlar.
 
-- **Application Lifetime Alignment**: The infinite loop aligns with the application's lifetime—consumer threads should run continuously while the application is running, processing notifications as they arrive. The loop naturally terminates when the application shuts down (via the shutdown mechanism), making an infinite loop the correct design pattern.
+- **Uygulama Ömrü Uyumu:** Sonsuz döngü, uygulamanın ömrüyle uyumludur—tüketici thread'leri uygulama çalışırken sürekli çalışmalı, bildirimler geldikçe işlemelidir. Döngü, uygulama kapandığında (kapatma mekanizması aracılığıyla) doğal olarak sonlanır, bu da sonsuz bir döngüyü doğru tasarım deseni yapar.
 
-- **No Resource Leakage**: Unlike unbounded loops in other contexts, this loop does not cause resource leaks because:
-  - Blocking operations release CPU resources
-  - Threads are managed by `ExecutorService`, which can be shut down
-  - The loop checks for termination conditions on each iteration
-  - InterruptedException is properly handled, allowing clean exit
+- **Kaynak Sızıntısı Yok:** Diğer bağlamlardaki sınırsız döngülerin aksine, bu döngü kaynak sızıntısına neden olmaz çünkü:
+    - Bloklayan işlemler CPU kaynaklarını serbest bırakır.
+    - Thread'ler kapatılabilen `ExecutorService` tarafından yönetilir.
+    - Döngü her iterasyonda sonlandırma koşullarını kontrol eder.
+    - InterruptedException düzgün bir şekilde yönetilir, temiz çıkışa izin verir.
 
-- **Standard Pattern**: Infinite loops with blocking operations are a standard pattern in producer-consumer systems, thread pools, and server applications. This is the idiomatic way to implement long-running worker threads that process items from a queue.
+- **Standart Desen:** Bloklayan işlemler içeren sonsuz döngüler, üretici-tüketici sistemlerinde, thread havuzlarında ve sunucu uygulamalarında standart bir desendir. Bir kuyruktan öğeleri işleyen uzun ömürlü işçi thread'lerini uygulamanın deyimsel yolu budur.
 
-The infinite loop is safe because it blocks efficiently, checks termination conditions, handles interruptions properly, and aligns with the application's operational model of continuous processing.
+Sonsuz döngü güvenlidir çünkü verimli bir şekilde bloklanır, sonlandırma koşullarını kontrol eder, kesilmeleri düzgün bir şekilde yönetir ve sürekli işleme şeklindeki uygulamanın operasyonel modeliyle uyumludur.
 
-### How Graceful Shutdown Should Work
+### Zarif Kapatma (Graceful Shutdown) Nasıl Çalışmalı?
 
-Graceful shutdown ensures that consumer workers stop processing new events and complete in-progress work before the application terminates. The `NotificationConsumerWorker` implements graceful shutdown using Spring's `@PreDestroy` lifecycle hook:
+Zarif kapatma, uygulama sonlandırılmadan önce tüketici işçilerinin yeni olayları işlemeyi durdurmasını ve devam eden işleri tamamlamasını sağlar. `NotificationConsumerWorker`, Spring'in `@PreDestroy` yaşam döngüsü kancasını kullanarak zarif kapatmayı uygular:
 
-1. **Shutdown Signal**: When Spring detects application shutdown (e.g., via SIGTERM signal, shutdown endpoint, or application context close), it calls the `@PreDestroy` annotated `shutdown()` method on the `NotificationConsumerWorker` bean.
+1. **Kapatma Sinyali:** Spring uygulama kapanışını algıladığında (örn. SIGTERM sinyali, kapatma uç noktası veya uygulama bağlamı kapanışı), `NotificationConsumerWorker` bean'i üzerindeki `@PreDestroy` ile işaretlenmiş `shutdown()` metodunu çağırır.
 
-2. **Running Flag Update**: The shutdown process first sets the `running` flag to `false` using `running.set(false)`. This causes consumer threads to exit their loops after completing the current iteration (once they check the condition `while (running.get() && ...)`).
+2. **Çalışıyor Bayrağı Güncellemesi:** Kapatma süreci önce `running.set(false)` kullanarak `running` bayrağını `false` yapar. Bu, tüketici thread'lerinin mevcut iterasyonu tamamladıktan sonra (`while (running.get() && ...)` koşulunu kontrol ettiklerinde) döngülerinden çıkmasına neden olur.
 
-3. **ExecutorService Shutdown**: The `ExecutorService.shutdown()` method is called, which:
-   - Prevents new tasks from being submitted
-   - Allows in-progress tasks (consumer loops) to complete
-   - Does not forcibly terminate threads
+3. **ExecutorService Kapatma:** `ExecutorService.shutdown()` metodu çağrılır, bu da:
+    - Yeni görevlerin gönderilmesini engeller.
+    - Devam eden görevlerin (tüketici döngülerinin) tamamlanmasına izin verir.
+    - Thread'leri zorla sonlandırmaz.
 
-4. **Graceful Wait**: The code waits for threads to terminate using `executorService.awaitTermination(30, TimeUnit.SECONDS)`. This gives consumer threads up to 30 seconds to:
-   - Check the `running` flag
-   - Complete any in-progress notification processing
-   - Exit their loops and terminate
+4. **Zarif Bekleme:** Kod, `executorService.awaitTermination(30, TimeUnit.SECONDS)` kullanarak thread'lerin sonlanmasını bekler. Bu, tüketici thread'lerine şunları yapmaları için 30 saniyeye kadar süre verir:
+    - `running` bayrağını kontrol etmek.
+    - Devam eden bildirim işlemlerini tamamlamak.
+    - Döngülerinden çıkmak ve sonlanmak.
 
-5. **Timeout Handling**: If threads do not terminate within the timeout:
-   - `shutdownNow()` is called, which interrupts all running threads
-   - This causes `InterruptedException` in threads blocked on `take()`, allowing them to exit
-   - Another await with a shorter timeout (10 seconds) provides a final opportunity for threads to terminate
+5. **Zaman Aşımı Yönetimi:** Eğer thread'ler zaman aşımı süresi içinde sonlanmazsa:
+    - `shutdownNow()` çağrılır, bu da çalışan tüm thread'leri keser (interrupt).
+    - Bu, `take()` üzerinde bloklanmış thread'lerde `InterruptedException`'a neden olarak çıkış yapmalarını sağlar.
+    - Daha kısa bir zaman aşımıyla (10 saniye) başka bir bekleme, thread'lerin sonlanması için son bir fırsat sağlar.
 
-6. **Force Termination**: If threads still do not terminate after the force shutdown, an error is logged, but the shutdown process continues. In practice, threads should terminate quickly after interruption.
+6. **Zorla Sonlandırma:** Zorla kapatma işleminden sonra thread'ler hala sonlanmazsa bir hata loglanır, ancak kapatma süreci devam eder. Pratikte, thread'ler kesilmeden sonra hızlıca sonlanmalıdır.
 
-7. **Interruption Handling**: If the shutdown process itself is interrupted (unlikely but possible), it calls `shutdownNow()` to ensure threads are interrupted and restores the interrupt status on the current thread.
+7. **Kesilme Yönetimi:** Eğer kapatma sürecinin kendisi kesilirse (olası değil ama mümkün), thread'lerin kesilmesini sağlamak için `shutdownNow()` çağrılır ve mevcut thread üzerindeki kesilme durumu geri yüklenir.
 
-**Important Considerations**:
+**Önemli Hususlar:**
 
-- **In-Progress Processing**: Notifications that are being processed when shutdown begins will complete their processing (assuming the processor logic handles the work quickly). Notifications waiting in the queue when shutdown begins will not be processed (they are lost, consistent with the in-memory, non-persistent design).
+- **Devam Eden İşleme:** Kapatma başladığında işlenmekte olan bildirimler işlemlerini tamamlayacaktır (işlemci mantığının işi hızlıca hallettiği varsayılarak). Kapatma başladığında kuyrukta bekleyen bildirimler işlenmeyecektir (bellek içi, kalıcı olmayan tasarımla tutarlı olarak kaybolurlar).
 
-- **Shutdown Timeout**: The 30-second timeout should be sufficient for most notification processing, but may need adjustment based on typical processing times. Very long-running processor operations might be interrupted.
+- **Kapatma Zaman Aşımı:** 30 saniyelik zaman aşımı çoğu bildirim işlemi için yeterli olmalıdır, ancak tipik işlem sürelerine göre ayarlanması gerekebilir. Çok uzun süren işlemci operasyonları kesilebilir.
 
-- **Thread Interruption**: The shutdown mechanism relies on thread interruption to wake threads blocked on `take()`. Processor implementations should avoid swallowing `InterruptedException` to ensure shutdown works correctly.
+- **Thread Kesilmesi (Interruption):** Kapatma mekanizması, `take()` üzerinde bloklanmış thread'leri uyandırmak için thread kesilmesine dayanır. İşlemci uygulamaları, kapatmanın doğru çalışmasını sağlamak için `InterruptedException`'ı yutmaktan kaçınmalıdır.
 
-- **Application Context**: The graceful shutdown works in conjunction with Spring's application context lifecycle. When the context is closed, `@PreDestroy` methods are called, triggering the shutdown sequence.
+- **Uygulama Bağlamı:** Zarif kapatma, Spring'in uygulama bağlamı yaşam döngüsüyle birlikte çalışır. Bağlam kapatıldığında, `@PreDestroy` metotları çağrılır ve kapatma dizisini tetikler.
 
-This graceful shutdown mechanism ensures that the application can shut down cleanly, without leaving threads running or forcing immediate termination that might corrupt state or leave resources in an inconsistent condition.
+Bu zarif kapatma mekanizması, uygulamanın thread'leri çalışır durumda bırakmadan veya durumu bozabilecek ya da kaynakları tutarsız bir durumda bırakabilecek ani sonlandırmaya zorlamadan temiz bir şekilde kapanmasını sağlar.
 
-## 10. Notification Handlers
+## 10. Bildirim İşleyicileri (Notification Handlers)
 
-The notification engine uses an interface-based handler architecture to process different types of notifications (Email, SMS, Push, etc.). This design provides extensibility, allowing new notification channels to be added without modifying existing code.
+Bildirim motoru, farklı bildirim türlerini (E-posta, SMS, Push vb.) işlemek için arayüz tabanlı bir işleyici mimarisi kullanır. Bu tasarım, mevcut kodu değiştirmeden yeni bildirim kanallarının eklenmesine olanak tanıyan genişletilebilirlik sağlar.
 
-### Architecture Overview
+### Mimari Genel Bakış
 
-The handler system consists of three key components:
+İşleyici sistemi üç temel bileşenden oluşur:
 
-- **`NotificationHandler` Interface**: Defines the contract for all notification handlers with two methods:
-  - `canHandle(NotificationType)`: Determines if the handler supports a specific notification type
-  - `handle(NotificationEvent)`: Processes and delivers the notification
+- **`NotificationHandler` Arayüzü:** İki metot ile tüm bildirim işleyicileri için sözleşmeyi tanımlar:
+    - `canHandle(NotificationType)`: İşleyicinin belirli bir bildirim türünü destekleyip desteklemediğini belirler.
+    - `handle(NotificationEvent)`: Bildirimi işler ve teslim eder.
 
-- **Handler Implementations**: Concrete implementations for each notification channel:
-  - `EmailHandler`: Handles email notifications (mock implementation)
-  - `SMSHandler`: Handles SMS notifications (mock implementation)
-  - `PushHandler`: Handles push notifications (mock implementation)
-  - Additional handlers can be added by implementing the `NotificationHandler` interface
+- **İşleyici Uygulamaları:** Her bildirim kanalı için somut uygulamalar:
+    - `EmailHandler`: E-posta bildirimlerini yönetir (mock uygulama).
+    - `SMSHandler`: SMS bildirimlerini yönetir (mock uygulama).
+    - `PushHandler`: Push bildirimlerini yönetir (mock uygulama).
+    - `NotificationHandler` arayüzü uygulanarak ek işleyiciler eklenebilir.
 
-- **`NotificationHandlerRegistry`**: Manages handler registration and selection, providing handler lookup based on notification type
+- **`NotificationHandlerRegistry`:** İşleyici kaydını ve seçimini yönetir, bildirim türüne göre işleyici araması sağlar.
 
-- **`HandlerBasedNotificationProcessor`**: Coordinates notification processing by selecting the appropriate handler via the registry and delegating processing to it
+- **`HandlerBasedNotificationProcessor`:** Kayıt defteri aracılığıyla uygun işleyiciyi seçerek ve işlemeyi ona devrederek bildirim işlemeyi koordine eder.
 
-### Handler Selection Logic
+### İşleyici Seçim Mantığı
 
-The handler selection logic is implemented in the `NotificationHandlerRegistry.getHandler()` method and follows these steps:
+İşleyici seçim mantığı `NotificationHandlerRegistry.getHandler()` metodunda uygulanır ve şu adımları izler:
 
-1. **Cache Lookup**: First checks an in-memory cache (`ConcurrentHashMap`) for previously resolved handlers. This provides O(1) lookup performance for known notification types after the initial selection.
+1. **Önbellek Araması:** Önce, önceden çözümlenmiş işleyiciler için bellek içi bir önbelleği (`ConcurrentHashMap`) kontrol eder. Bu, ilk seçimden sonra bilinen bildirim türleri için O(1) arama performansı sağlar.
 
-2. **Handler Iteration**: If not cached, iterates through all registered handlers (injected by Spring as a list of `NotificationHandler` beans). For each handler, calls `canHandle(notificationType)` to check if it supports the requested notification type.
+2. **İşleyici İterasyonu:** Önbellekte yoksa, kayıtlı tüm işleyiciler (Spring tarafından `NotificationHandler` bean'leri listesi olarak enjekte edilir) üzerinde yineler. Her işleyici için, istenen bildirim türünü destekleyip desteklemediğini kontrol etmek üzere `canHandle(notificationType)` çağrılır.
 
-3. **First Match Selection**: Returns the first handler that returns `true` from `canHandle()`. This allows handlers to be registered in priority order if needed, though typically each handler supports exactly one notification type.
+3. **İlk Eşleşme Seçimi:** `canHandle()`'dan `true` döndüren ilk işleyiciyi döndürür. Bu, işleyicilerin öncelik sırasına göre kaydedilmesine olanak tanır, ancak tipik olarak her işleyici tam olarak bir bildirim türünü destekler.
 
-4. **Cache Storage**: Once a handler is found, it is stored in the cache for future lookups, eliminating the need for iteration on subsequent requests for the same notification type.
+4. **Önbellek Depolama:** Bir işleyici bulunduğunda, aynı bildirim türü için sonraki isteklerde yinelemeye gerek kalmaması için önbellekte saklanır.
 
-5. **Error Handling**: If no handler is found for a given notification type, throws an `IllegalArgumentException` with a descriptive error message. This fails-fast approach ensures that unsupported notification types are detected immediately.
+5. **Hata Yönetimi:** Verilen bildirim türü için hiçbir işleyici bulunamazsa, açıklayıcı bir hata mesajıyla `IllegalArgumentException` fırlatır. Bu hızlı hata yaklaşımı, desteklenmeyen bildirim türlerinin hemen algılanmasını sağlar.
 
-**Selection Algorithm Pseudocode**:
+**Seçim Algoritması Sözde Kodu (Pseudocode):**
 ```
 getHandler(notificationType):
-  if cached: return cached handler
-  for each registered handler:
+  if önbellekte varsa: return önbellekteki işleyici
+  her kayıtlı işleyici için:
     if handler.canHandle(notificationType):
-      cache handler
-      return handler
-  throw IllegalArgumentException("No handler found")
+      işleyiciyi önbelleğe al
+      return işleyici
+  throw IllegalArgumentException("İşleyici bulunamadı")
 ```
 
-### Design Principles
+### Tasarım Prensipleri
 
-The handler architecture follows several key design principles:
+İşleyici mimarisi birkaç temel tasarım prensibini takip eder:
 
-- **Open/Closed Principle**: The system is open for extension (new handlers can be added) but closed for modification (existing handlers and the registry don't need changes when adding new handlers).
+- **Açık/Kapalı Prensibi (Open/Closed Principle):** Sistem genişlemeye açıktır (yeni işleyiciler eklenebilir) ancak değişime kapalıdır (yeni işleyiciler eklerken mevcut işleyicilerin ve kayıt defterinin değişmesine gerek yoktur).
 
-- **Single Responsibility**: Each handler is responsible for one notification channel, keeping implementations focused and maintainable.
+- **Tek Sorumluluk:** Her işleyici tek bir bildirim kanalından sorumludur, bu da uygulamaları odaklanmış ve sürdürülebilir tutar.
 
-- **Strategy Pattern**: The handler selection mechanism uses the Strategy pattern, allowing the algorithm for selecting handlers to vary independently from the code that uses them.
+- **Strateji Deseni:** İşleyici seçim mekanizması Strateji desenini kullanır, bu da işleyicileri seçme algoritmasının onları kullanan koddan bağımsız olarak değişmesine izin verir.
 
-- **Dependency Injection**: Handlers are automatically discovered and registered via Spring's dependency injection. New handlers are automatically included in the registry without configuration changes.
+- **Bağımlılık Enjeksiyonu:** İşleyiciler Spring'in bağımlılık enjeksiyonu aracılığıyla otomatik olarak keşfedilir ve kaydedilir. Yeni işleyiciler, yapılandırma değişikliği olmadan otomatik olarak kayıt defterine dahil edilir.
 
-- **Loose Coupling**: Handlers don't know about each other or about the registry's implementation details. They only need to implement the `NotificationHandler` interface.
+- **Gevşek Bağlılık:** İşleyiciler birbirlerini veya kayıt defterinin uygulama detaylarını bilmezler. Sadece `NotificationHandler` arayüzünü uygulamaları gerekir.
 
-### Extensibility
+### Genişletilebilirlik
 
-Adding a new notification handler is straightforward and requires no changes to existing code:
+Yeni bir bildirim işleyicisi eklemek basittir ve mevcut kodda değişiklik gerektirmez:
 
-1. **Create Handler Implementation**: Implement the `NotificationHandler` interface:
-   ```java
-   @Component
-   public class NewChannelHandler implements NotificationHandler {
-       @Override
-       public boolean canHandle(NotificationType type) {
-           return NotificationType.NEW_CHANNEL == type;
-       }
+1. **İşleyici Uygulaması Oluştur:** `NotificationHandler` arayüzünü uygula:
+    ```java
+    @Component
+    public class NewChannelHandler implements NotificationHandler {
+        @Override
+        public boolean canHandle(NotificationType type) {
+            return NotificationType.NEW_CHANNEL == type;
+        }
        
-       @Override
-       public void handle(NotificationEvent event) throws Exception {
-           // Implementation logic
-       }
-   }
-   ```
+        @Override
+        public void handle(NotificationEvent event) throws Exception {
+            // Uygulama mantığı
+        }
+    }
+    ```
 
-2. **Add Notification Type**: If needed, add a new value to the `NotificationType` enum.
+2. **Bildirim Türü Ekle:** Gerekirse, `NotificationType` enum'ına yeni bir değer ekle.
 
-3. **Automatic Registration**: Spring automatically discovers the new handler bean and includes it in the registry. No configuration changes are required.
+3. **Otomatik Kayıt:** Spring, yeni işleyici bean'ini otomatik olarak keşfeder ve kayıt defterine dahil eder. Yapılandırma değişikliği gerekmez.
 
-4. **Handler Selection**: The registry automatically includes the new handler in its selection logic. Notifications of the new type will be routed to the new handler.
+4. **İşleyici Seçimi:** Kayıt defteri, yeni işleyiciyi seçim mantığına otomatik olarak dahil eder. Yeni türdeki bildirimler yeni işleyiciye yönlendirilir.
 
-This extensibility makes it easy to add support for new notification channels (e.g., Slack, Discord, Microsoft Teams) without modifying existing handlers, the registry, or the processor.
+Bu genişletilebilirlik, mevcut işleyicileri, kayıt defterini veya işlemciyi değiştirmeden yeni bildirim kanalları (örn. Slack, Discord, Microsoft Teams) için destek eklemeyi kolaylaştırır.
 
-### Mock Implementations
+### Mock (Taklit) Uygulamalar
 
-The current handler implementations (EmailHandler, SMSHandler, PushHandler) are mock implementations designed for demonstration and testing:
+Mevcut işleyici uygulamaları (EmailHandler, SMSHandler, PushHandler), gösterim ve test amaçlı tasarlanmış mock uygulamalardır:
 
-- **EmailHandler**: Simulates email sending with logging and a simulated delay (150ms). In production, this would integrate with email service providers like SendGrid, AWS SES, or Mailgun.
+- **EmailHandler:** Loglama ve simüle edilmiş bir gecikme (150ms) ile e-posta gönderimini simüle eder. Prodüksiyonda bu, SendGrid, AWS SES veya Mailgun gibi e-posta servis sağlayıcılarıyla entegre olur.
 
-- **SMSHandler**: Simulates SMS sending with logging and a simulated delay (100ms). In production, this would integrate with SMS gateway providers like Twilio, AWS SNS, or Vonage.
+- **SMSHandler:** Loglama ve simüle edilmiş bir gecikme (100ms) ile SMS gönderimini simüle eder. Prodüksiyonda bu, Twilio, AWS SNS veya Vonage gibi SMS ağ geçidi sağlayıcılarıyla entegre olur.
 
-- **PushHandler**: Simulates push notification sending with logging and a simulated delay (120ms). In production, this would integrate with push notification services like Firebase Cloud Messaging, Apple Push Notification Service, or OneSignal.
+- **PushHandler:** Loglama ve simüle edilmiş bir gecikme (120ms) ile push bildirim gönderimini simüle eder. Prodüksiyonda bu, Firebase Cloud Messaging, Apple Push Notification Service veya OneSignal gibi push bildirim servisleriyle entegre olur.
 
-These mock implementations allow the system to be tested and demonstrated without requiring external service integrations, API keys, or network connectivity. Replacing them with real implementations is straightforward: update the `handle()` method to call the actual service API while maintaining the same interface contract.
+Bu mock uygulamalar, harici servis entegrasyonlarına, API anahtarlarına veya ağ bağlantısına gerek kalmadan sistemin test edilmesine ve gösterilmesine olanak tanır. Bunları gerçek uygulamalarla değiştirmek basittir: aynı arayüz sözleşmesini koruyarak `handle()` metodunu gerçek servis API'sini çağıracak şekilde güncelleyin.
 
-### Error Handling
+### Hata Yönetimi
 
-Each handler is responsible for handling errors specific to its notification channel:
+Her işleyici, kendi bildirim kanalına özgü hataları yönetmekten sorumludur:
 
-- **Handler-Level Errors**: If a handler's `handle()` method throws an exception, the exception propagates to the `NotificationConsumerWorker`, which logs the error and continues processing the next notification. This ensures that one failed notification doesn't stop the entire consumer thread.
+- **İşleyici Seviyesi Hatalar:** Bir işleyicinin `handle()` metodu bir istisna fırlatırsa, istisna `NotificationConsumerWorker`'a yayılır; o da hatayı loglar ve bir sonraki bildirimi işlemeye devam eder. Bu, başarısız olan bir bildirimin tüm tüketici thread'ini durdurmamasını sağlar.
 
-- **Selection Errors**: If no handler is found for a notification type, an `IllegalArgumentException` is thrown, which is logged as an error. This typically indicates a configuration issue (e.g., a notification type was added but no handler was implemented).
+- **Seçim Hataları:** Bir bildirim türü için hiçbir işleyici bulunamazsa, bir hata olarak loglanan `IllegalArgumentException` fırlatılır. Bu genellikle bir yapılandırma sorununu gösterir (örn. bir bildirim türü eklendi ancak hiçbir işleyici uygulanmadı).
 
-- **Channel-Specific Errors**: Handlers can throw channel-specific exceptions (e.g., `EmailDeliveryException`, `SMSGatewayException`). The processor and consumer layers handle these generically, logging them appropriately. For production systems, handlers might implement retry logic, dead-letter queues, or fallback mechanisms.
+- **Kanala Özgü Hatalar:** İşleyiciler kanala özgü istisnalar fırlatabilir (örn. `EmailDeliveryException`, `SMSGatewayException`). İşlemci ve tüketici katmanları bunları genel olarak ele alır ve uygun şekilde loglar. Prodüksiyon sistemleri için işleyiciler yeniden deneme mantığı, ölü mektup kuyrukları (dead-letter queues) veya yedek mekanizmalar uygulayabilir.
 
-## 11. REST API Controller
+## 11. REST API Controller (REST API Denetleyicisi)
 
-The notification engine exposes a REST API endpoint for submitting notification requests. The API is designed for asynchronous processing, returning immediately after accepting the request without waiting for notification delivery.
+Bildirim motoru, bildirim isteklerini göndermek için bir REST API uç noktası sunar. API, isteği kabul ettikten hemen sonra bildirim teslimini beklemeden dönecek şekilde asenkron işleme için tasarlanmıştır.
 
-### API Endpoint
+### API Uç Noktası
 
 **POST** `/api/notifications`
 
-Submits a notification request for asynchronous processing.
+Asenkron işleme için bir bildirim isteği gönderir.
 
-**Request Body** (JSON):
+**İstek Gövdesi** (JSON):
 ```json
 {
   "notificationType": "EMAIL",
@@ -439,7 +439,7 @@ Submits a notification request for asynchronous processing.
 }
 ```
 
-**Response** (HTTP 202 Accepted):
+**Yanıt** (HTTP 202 Accepted):
 ```json
 {
   "id": "550e8400-e29b-41d4-a716-446655440000",
@@ -449,250 +449,249 @@ Submits a notification request for asynchronous processing.
 }
 ```
 
-### Input Validation
+### Girdi Doğrulama
 
-The API validates incoming requests using Bean Validation annotations:
+API, Bean Validation notasyonlarını kullanarak gelen istekleri doğrular:
 
-- **`notificationType`**: Required, must be a valid `NotificationType` enum value (EMAIL, SMS, PUSH, IN_APP, WEBHOOK)
-- **`recipient`**: Required, must not be blank (e.g., email address, phone number, device token)
-- **`body`**: Required, must not be blank (the notification message content)
-- **`subject`**: Optional, used for email and push notifications with titles
-- **`priority`**: Optional, defaults to NORMAL if not provided (LOW, NORMAL, HIGH, URGENT)
-- **`metadata`**: Optional, key-value map for additional context
+- **`notificationType`**: Zorunlu, geçerli bir `NotificationType` enum değeri olmalıdır (EMAIL, SMS, PUSH, IN_APP, WEBHOOK)
+- **`recipient`**: Zorunlu, boş olmamalıdır (örn. e-posta adresi, telefon numarası, cihaz token'ı)
+- **`body`**: Zorunlu, boş olmamalıdır (bildirim mesajı içeriği)
+- **`subject`**: İsteğe bağlı, başlıklı e-posta ve push bildirimleri için kullanılır
+- **`priority`**: İsteğe bağlı, sağlanmazsa NORMAL varsayılır (LOW, NORMAL, HIGH, URGENT)
+- **`metadata`**: İsteğe bağlı, ek bağlam için anahtar-değer haritası
 
-Validation errors return HTTP 400 Bad Request with detailed error messages indicating which fields failed validation.
+Doğrulama hataları, hangi alanların doğrulamadan geçemediğini belirten ayrıntılı hata mesajlarıyla birlikte HTTP 400 Bad Request döndürür.
 
-### Async Behavior Explained
+### Asenkron Davranış Açıklaması
 
-The REST API endpoint exhibits fully asynchronous behavior:
+REST API uç noktası tamamen asenkron bir davranış sergiler:
 
-1. **Immediate Response**: The controller returns HTTP 202 Accepted immediately after validating the request and enqueueing the notification. The response includes a unique notification ID but does not wait for notification delivery.
+1. **Anında Yanıt:** Denetleyici, isteği doğrulayıp bildirimi kuyruğa ekledikten hemen sonra HTTP 202 Accepted döndürür. Yanıt benzersiz bir bildirim ID'si içerir ancak bildirim teslimini beklemez.
 
-2. **Request Processing Flow**:
-   - Client sends POST request to `/api/notifications`
-   - Controller validates the request (synchronously, fast operation)
-   - Service creates a `NotificationEvent` with a generated UUID
-   - Service enqueues the event into the `BlockingQueue` (may block if queue is full, but this is a queue operation, not notification delivery)
-   - Controller returns HTTP 202 Accepted with notification ID
-   - Client receives response (request processing complete from client's perspective)
-   - **Meanwhile, in background**: Consumer worker threads poll the queue and process notifications asynchronously
+2. **İstek İşleme Akışı:**
+    - İstemci `/api/notifications` adresine POST isteği gönderir.
+    - Denetleyici isteği doğrular (senkron, hızlı işlem).
+    - Servis, oluşturulan bir UUID ile `NotificationEvent` yaratır.
+    - Servis, olayı `BlockingQueue` içine ekler (kuyruk doluysa bloklanabilir, ancak bu bir kuyruk işlemidir, bildirim teslimi değildir).
+    - Denetleyici, bildirim ID'si ile HTTP 202 Accepted döndürür.
+    - İstemci yanıtı alır (istemci açısından istek işleme tamamlanmıştır).
+    - **Bu arada, arka planda:** Tüketici işçi thread'leri kuyruğu yoklar ve bildirimleri asenkron olarak işler.
 
-3. **No Waiting for Delivery**: The API does not wait for:
-   - Notification delivery to external services (email providers, SMS gateways, etc.)
-   - Handler processing completion
-   - Consumer worker processing
-   - Any network calls to external notification services
+3. **Teslimat İçin Bekleme Yok:** API şunları beklemez:
+    - Harici servislere (e-posta sağlayıcıları, SMS ağ geçitleri vb.) bildirim teslimi.
+    - İşleyici işleme tamamlanması.
+    - Tüketici işçisi işlemesi.
+    - Harici bildirim servislerine yapılan herhangi bir ağ çağrısı.
 
-4. **Fire-and-Forget Model**: Once the notification is enqueued and HTTP 202 is returned, the API's responsibility ends. Notification delivery happens in the background, completely decoupled from the HTTP request/response cycle.
+4. **Ateşle ve Unut (Fire-and-Forget) Modeli:** Bildirim kuyruğa eklenip HTTP 202 döndürüldüğünde, API'nin sorumluluğu sona erer. Bildirim teslimi arka planda gerçekleşir, HTTP istek/yanıt döngüsünden tamamen ayrılmıştır.
 
-5. **Queue Operation**: The only potentially blocking operation is the queue enqueue operation (`put()`), which blocks only if the queue is full (applying backpressure). However, this is still orders of magnitude faster than waiting for actual notification delivery, and it ensures system stability by preventing unbounded queue growth.
+5. **Kuyruk İşlemi:** Potansiyel olarak bloklayan tek işlem, sadece kuyruk dolu olduğunda (geri basınç uygulayarak) bloklanan kuyruk ekleme işlemidir (`put()`). Ancak bu yine de gerçek bildirim teslimini beklemekten kat kat daha hızlıdır ve sınırsız kuyruk büyümesini önleyerek sistem kararlılığını sağlar.
 
-### HTTP Status Codes
+### HTTP Durum Kodları
 
-- **202 Accepted**: Notification request was accepted and enqueued successfully
-- **400 Bad Request**: Request validation failed (missing required fields, invalid values)
-- **500 Internal Server Error**: Unexpected error occurred during request processing
-- **503 Service Unavailable**: Service interrupted during processing (rare, indicates system shutdown)
+- **202 Accepted:** Bildirim isteği kabul edildi ve başarıyla kuyruğa eklendi
+- **400 Bad Request:** İstek doğrulama başarısız oldu (eksik zorunlu alanlar, geçersiz değerler)
+- **500 Internal Server Error:** İstek işleme sırasında beklenmeyen bir hata oluştu
+- **503 Service Unavailable:** Servis işleme sırasında kesintiye uğradı (nadir, sistemin kapandığını gösterir)
 
-### Response Time Characteristics
+### Yanıt Süresi Karakteristikleri
 
-- **Typical Response Time**: < 10ms (validation + queue enqueue, assuming queue has capacity)
-- **Under Load**: May increase if queue is full (producer blocks waiting for space), but still much faster than synchronous notification delivery
-- **Network Independence**: Response time is independent of external notification service latency, network conditions, or notification delivery success/failure
+- **Tipik Yanıt Süresi:** < 10ms (doğrulama + kuyruğa ekleme, kuyrukta kapasite olduğu varsayılarak)
+- **Yük Altında:** Kuyruk doluysa artabilir (üretici yer açılmasını beklerken bloklanır), ancak yine de senkron bildirim tesliminden çok daha hızlıdır
+- **Ağ Bağımsızlığı:** Yanıt süresi; harici bildirim servisi gecikmesinden, ağ koşullarından veya bildirim teslim başarısı/başarısızlığından bağımsızdır
 
-### Error Handling
+### Hata Yönetimi
 
-- **Validation Errors**: Returned immediately with HTTP 400 and detailed field-level error messages
-- **Queue Full**: If the queue is at capacity, the `put()` operation blocks until space becomes available. This applies backpressure to clients but ensures no notifications are lost
-- **Interruption**: If the service is shutting down and the thread is interrupted, returns HTTP 503
-- **Processing Errors**: Errors during notification delivery (after HTTP 202 is returned) are handled by consumer workers and logged, but do not affect the API response
+- **Doğrulama Hataları:** HTTP 400 ve ayrıntılı alan seviyesi hata mesajlarıyla hemen döndürülür
+- **Kuyruk Dolu:** Kuyruk kapasitedeyse, `put()` işlemi yer açılana kadar bloklanır. Bu, istemcilere geri basınç uygular ancak hiçbir bildirimin kaybolmamasını sağlar
+- **Kesilme (Interruption):** Servis kapanıyorsa ve thread kesilirse, HTTP 503 döndürür
+- **İşleme Hataları:** Bildirim teslimi sırasındaki hatalar (HTTP 202 döndürüldükten sonra) tüketici işçileri tarafından yönetilir ve loglanır, ancak API yanıtını etkilemez
 
-### Use Cases
+### Kullanım Durumları
 
-The async API design is ideal for:
+Asenkron API tasarımı şunlar için idealdir:
 
-- **High-Throughput Scenarios**: Can accept thousands of notification requests per second without being blocked by slow external services
-- **User-Facing Operations**: User registration, order placement, and other operations that trigger notifications don't wait for notification delivery, improving user experience
-- **Batch Operations**: Can submit large numbers of notifications quickly without waiting for each to be delivered
-- **Resilient Systems**: External notification service outages don't block the API (notifications queue up for processing when services recover)
+- **Yüksek İş Hacmi Senaryoları:** Yavaş harici servisler tarafından bloklanmadan saniyede binlerce bildirim isteğini kabul edebilir
+- **Kullanıcıya Dönük Operasyonlar:** Bildirimleri tetikleyen kullanıcı kaydı, sipariş verme gibi işlemler bildirim teslimini beklemez, kullanıcı deneyimini iyileştirir
+- **Toplu İşlemler:** Her birinin teslim edilmesini beklemeden çok sayıda bildirimi hızlıca gönderebilir
+- **Dayanıklı Sistemler:** Harici bildirim servisi kesintileri API'yi bloklamaz (servisler düzeldiğinde işlenmek üzere bildirimler kuyruğa alınır)
 
-The async nature means clients cannot determine notification delivery status from the API response alone. For delivery status, clients would need to implement separate tracking mechanisms (e.g., webhooks, status polling, event logs).
+Asenkron doğası, istemcilerin sadece API yanıtından bildirim teslim durumunu belirleyemeyeceği anlamına gelir. Teslim durumu için, istemcilerin ayrı takip mekanizmaları (örn. webhooklar, durum sorgulama, olay logları) uygulaması gerekir.
 
-## 12. System Limitations and Architectural Considerations
+## 12. Sistem Sınırlamaları ve Mimari Değerlendirmeler
 
-Understanding the limitations and boundaries of the CoreNotifyEngine is crucial for making informed architectural decisions. This section outlines the system's constraints, clarifies why it cannot serve as a replacement for distributed messaging systems like Kafka, and discusses potential improvements for future iterations.
+CoreNotifyEngine'in sınırlamalarını ve sınırlarını anlamak, bilinçli mimari kararlar almak için çok önemlidir. Bu bölüm, sistemin kısıtlamalarını ana hatlarıyla belirtir, neden Kafka gibi dağıtık mesajlaşma sistemlerinin yerini alamayacağını açıklar ve gelecekteki iterasyonlar için potansiyel iyileştirmeleri tartışır.
 
-### System Limitations
+### Sistem Sınırlamaları
 
-#### In-Memory Queue Constraints
+#### Bellek İçi (In-Memory) Kuyruk Kısıtlamaları
 
-The notification engine uses an in-memory `BlockingQueue` which imposes several constraints:
+Bildirim motoru, bellek içi bir `BlockingQueue` kullanır ve bu da çeşitli kısıtlamalar getirir:
 
-- **Memory Boundedness**: Queue capacity is limited by available heap memory. A queue configured with 10,000 capacity and average notification size of 1KB consumes approximately 10MB of heap space just for queue storage (excluding object overhead). Heap size limits effectively cap the maximum queue size.
+- **Bellek Sınırlılığı:** Kuyruk kapasitesi mevcut heap belleği ile sınırlıdır. 10.000 kapasiteli ve ortalama bildirim boyutu 1KB olan bir kuyruk, sadece kuyruk depolama için yaklaşık 10MB heap alanı tüketir (nesne ek yükü hariç). Heap boyutu sınırları, maksimum kuyruk boyutunu etkili bir şekilde sınırlar.
 
-- **No Persistence**: All queued notifications exist only in JVM heap memory. System crashes, unexpected JVM termination, or out-of-memory conditions result in immediate loss of all queued notifications that haven't been processed.
+- **Kalıcılık Yok:** Tüm kuyruklanmış bildirimler sadece JVM heap belleğinde bulunur. Sistem çökmeleri, beklenmeyen JVM sonlandırmaları veya bellek yetersizliği durumları, henüz işlenmemiş tüm kuyruklanmış bildirimlerin anında kaybolmasına neden olur.
 
-- **Garbage Collection Impact**: Large queues with many notification objects increase GC pressure. Frequent GC pauses can temporarily slow down both enqueue and dequeue operations, affecting latency and throughput.
+- **Çöp Toplayıcı (Garbage Collection) Etkisi:** Çok sayıda bildirim nesnesi içeren büyük kuyruklar GC baskısını artırır. Sık GC duraklamaları hem ekleme hem de çıkarma işlemlerini geçici olarak yavaşlatabilir, gecikmeyi ve iş hacmini etkileyebilir.
 
-- **Queue Size Tuning**: The optimal queue size depends on multiple factors: expected notification volume, processing rate, available memory, and acceptable latency. Too small a queue causes frequent producer blocking; too large a queue wastes memory and increases GC overhead.
+- **Kuyruk Boyutu Ayarlama:** Optimal kuyruk boyutu birden fazla faktöre bağlıdır: beklenen bildirim hacmi, işleme oranı, mevcut bellek ve kabul edilebilir gecikme. Çok küçük bir kuyruk sık sık üretici bloklanmasına neden olur; çok büyük bir kuyruk belleği israf eder ve GC ek yükünü artırır.
 
-#### Data Loss Scenarios
+#### Veri Kaybı Senaryoları
 
-Several scenarios can lead to notification loss:
+Birkaç senaryo bildirim kaybına yol açabilir:
 
-1. **Application Restart**: Normal application shutdown results in loss of all queued notifications that haven't been processed, even with graceful shutdown. The shutdown process completes in-progress notifications but discards queued items.
+1. **Uygulama Yeniden Başlatma:** Normal uygulama kapanışı, zarif kapatma olsa bile, henüz işlenmemiş tüm kuyruklanmış bildirimlerin kaybıyla sonuçlanır. Kapatma işlemi devam eden bildirimleri tamamlar ancak kuyruklanmış öğeleri atar.
 
-2. **Unexpected Termination**: JVM crashes, `kill -9` signals, out-of-memory errors, or system failures cause immediate loss of all queued notifications without any recovery mechanism.
+2. **Beklenmeyen Sonlandırma:** JVM çökmeleri, `kill -9` sinyalleri, bellek yetersizliği hataları veya sistem arızaları, herhangi bir kurtarma mekanizması olmaksızın tüm kuyruklanmış bildirimlerin anında kaybına neden olur.
 
-3. **Queue Overflow (Blocking Behavior)**: While the bounded queue prevents unbounded memory growth, when the queue is full, producers block on `put()` operations. If the application is terminated while producers are blocked, those notifications are lost.
+3. **Kuyruk Taşması (Bloklama Davranışı):** Sınırlı kuyruk, sınırsız bellek büyümesini önlese de, kuyruk dolduğunda üreticiler `put()` işlemlerinde bloklanır. Üreticiler bloklanmışken uygulama sonlandırılırsa, bu bildirimler kaybolur.
 
-4. **Processing Failures**: If a consumer thread crashes or encounters an unhandled exception during processing, the notification being processed at that moment is lost (though this is mitigated by exception handling in the consumer loop).
+4. **İşleme Hataları:** Bir tüketici thread işleme sırasında çökerse veya yönetilmeyen bir istisna ile karşılaşırsa, o anda işlenmekte olan bildirim kaybolur (tüketici döngüsündeki istisna yönetimi ile hafifletilmiş olsa da).
 
-These data loss characteristics make the system unsuitable for use cases requiring guaranteed delivery or where notification loss is unacceptable.
+Bu veri kaybı özellikleri, sistemi garantili teslimat gerektiren veya bildirim kaybının kabul edilemez olduğu kullanım durumları için uygunsuz hale getirir.
 
-#### Scalability Boundaries
+#### Ölçeklenebilirlik Sınırları
 
-The system's scalability is fundamentally limited by single-instance constraints:
+Sistemin ölçeklenebilirliği temel olarak tek örnek (single-instance) kısıtlamalarıyla sınırlıdır:
 
-- **Vertical Scaling Only**: Scalability is achieved only through vertical scaling (increasing CPU cores, memory, thread count). There is no horizontal scaling capability—running multiple application instances does not increase overall capacity; each instance maintains its own independent queue.
+- **Sadece Dikey Ölçekleme:** Ölçeklenebilirlik yalnızca dikey ölçekleme (CPU çekirdeklerini, belleği, thread sayısını artırma) ile elde edilir. Yatay ölçekleme yeteneği yoktur—birden fazla uygulama örneği çalıştırmak genel kapasiteyi artırmaz; her örnek kendi bağımsız kuyruğunu korur.
 
-- **Thread Pool Limitations**: Consumer thread count is configurable but limited by:
-  - Available CPU cores (optimal thread count is typically 1-2x CPU cores for I/O-bound workloads)
-  - JVM thread limits (typically thousands, but excessive threads cause context switching overhead)
-  - Memory per thread (each thread has its own stack, typically 1MB per thread)
+- **Thread Havuzu Sınırlamaları:** Tüketici thread sayısı yapılandırılabilir ancak şunlarla sınırlıdır:
+    - Mevcut CPU çekirdekleri (optimal thread sayısı genellikle I/O ağırlıklı iş yükleri için CPU çekirdeklerinin 1-2 katıdır)
+    - JVM thread sınırları (genellikle binlerce, ancak aşırı thread bağlam değiştirme ek yüküne neden olur)
+    - Thread başına bellek (her thread kendi yığınına sahiptir, genellikle thread başına 1MB)
 
-- **Queue Throughput**: Maximum throughput is bounded by:
-  - Consumer thread count and processing speed
-  - Queue capacity (affects how much work can be buffered)
-  - Handler processing latency (network calls to external services)
+- **Kuyruk İş Hacmi:** Maksimum iş hacmi şunlarla sınırlıdır:
+    - Tüketici thread sayısı ve işleme hızı
+    - Kuyruk kapasitesi (ne kadar işin tamponlanabileceğini etkiler)
+    - İşleyici işleme gecikmesi (harici servislere yapılan ağ çağrıları)
 
-- **Memory Bottleneck**: As notification volume increases, memory becomes the primary bottleneck. Larger queues require more memory, and processing more notifications simultaneously increases memory pressure.
+- **Bellek Darboğazı:** Bildirim hacmi arttıkça, bellek birincil darboğaz haline gelir. Daha büyük kuyruklar daha fazla bellek gerektirir ve aynı anda daha fazla bildirim işlemek bellek baskısını artırır.
 
-Practical scalability boundaries: The system can typically handle thousands to tens of thousands of notifications per minute on a single instance, depending on processing complexity, but cannot scale beyond a single machine's resources.
+Pratik ölçeklenebilirlik sınırları: Sistem tipik olarak, işleme karmaşıklığına bağlı olarak tek bir örnekte dakikada binlerce ila on binlerce bildirimi işleyebilir, ancak tek bir makinenin kaynaklarının ötesine geçemez.
 
-#### Single-Instance Limitations
+#### Tek Örnek (Single-Instance) Sınırlamaları
 
-The engine operates entirely within a single JVM instance, which imposes several constraints:
+Motor tamamen tek bir JVM örneği içinde çalışır, bu da çeşitli kısıtlamalar getirir:
 
-- **No Distributed Coordination**: Multiple application instances cannot coordinate or share workload. Each instance operates independently with its own queue, consumers, and processing logic. There is no cross-instance communication or load balancing.
+- **Dağıtık Koordinasyon Yok:** Birden fazla uygulama örneği iş yükünü koordine edemez veya paylaşamaz. Her örnek kendi kuyruğu, tüketicileri ve işleme mantığı ile bağımsız çalışır. Örnekler arası iletişim veya yük dengeleme yoktur.
 
-- **No High Availability**: The system has no built-in high availability mechanism. If the single instance fails, all processing stops, and all queued notifications are lost. There is no failover or redundancy.
+- **Yüksek Erişilebilirlik (HA) Yok:** Sistemin yerleşik bir yüksek erişilebilirlik mekanizması yoktur. Tek örnek başarısız olursa, tüm işleme durur ve tüm kuyruklanmış bildirimler kaybolur. Yük devretme (failover) veya yedeklilik yoktur.
 
-- **Instance-Level Isolation**: Notifications submitted to one instance are never visible to other instances. This means clients must always connect to the same instance to check status (though status checking is not part of the current design).
+- **Örnek Seviyesinde İzolasyon:** Bir örneğe gönderilen bildirimler diğer örneklere asla görünmez. Bu, istemcilerin durumu kontrol etmek için her zaman aynı örneğe bağlanması gerektiği anlamına gelir (mevcut tasarımda durum kontrolü olmasa da).
 
-- **Deployment Constraints**: Horizontal scaling strategies (load balancing across instances) result in independent queues per instance, making it impossible to guarantee uniform notification processing or implement cross-instance features like priority ordering or global rate limiting.
+- **Dağıtım Kısıtlamaları:** Yatay ölçekleme stratejileri (örnekler arasında yük dengeleme), örnek başına bağımsız kuyruklarla sonuçlanır, bu da tek tip bildirim işlemeyi garanti etmeyi veya öncelik sıralaması ya da global hız sınırlaması gibi örnekler arası özellikleri uygulamayı imkansız hale getirir.
 
-### Why This System is NOT a Kafka Replacement
+### Neden Bu Sistem Bir Kafka Alternatifi DEĞİLDİR?
 
-CoreNotifyEngine should not be considered or used as a replacement for Apache Kafka or similar distributed messaging systems. The architectures serve fundamentally different purposes:
+CoreNotifyEngine, Apache Kafka veya benzeri dağıtık mesajlaşma sistemlerinin yerine geçecek bir sistem olarak düşünülmemeli veya kullanılmamalıdır. Mimariler temel olarak farklı amaçlara hizmet eder:
 
-#### Lack of Durability
+#### Dayanıklılık (Durability) Eksikliği
 
-- **Kafka**: Provides durable message storage with configurable retention policies. Messages are persisted to disk and survive broker restarts, crashes, and failures. Messages can be stored for hours, days, or indefinitely.
+- **Kafka:** Yapılandırılabilir saklama politikalarıyla dayanıklı mesaj depolaması sağlar. Mesajlar diske kaydedilir ve broker yeniden başlatmalarında, çökmelerde ve arızalarda hayatta kalır. Mesajlar saatlerce, günlerce veya süresiz olarak saklanabilir.
 
-- **CoreNotifyEngine**: Messages exist only in memory and are lost on restart or crash. There is no persistence layer, no disk storage, and no retention mechanism.
+- **CoreNotifyEngine:** Mesajlar sadece bellekte bulunur ve yeniden başlatma veya çökme durumunda kaybolur. Kalıcılık katmanı, disk depolaması ve saklama mekanizması yoktur.
 
-#### No Distributed Consensus
+#### Dağıtık Konsensüs Yok
 
-- **Kafka**: Uses distributed consensus algorithms (ZooKeeper/KRaft) for cluster coordination, leader election, partition management, and metadata synchronization. Multiple brokers can operate as a cohesive cluster with automatic failover.
+- **Kafka:** Küme koordinasyonu, lider seçimi, bölüm (partition) yönetimi ve metadata senkronizasyonu için dağıtık konsensüs algoritmaları (ZooKeeper/KRaft) kullanır. Birden fazla broker, otomatik yük devretme ile uyumlu bir küme olarak çalışabilir.
 
-- **CoreNotifyEngine**: Operates as a single standalone instance with no distributed coordination. There is no cluster, no consensus mechanism, and no distributed state management.
+- **CoreNotifyEngine:** Dağıtık koordinasyon olmaksızın tek bir bağımsız örnek olarak çalışır. Küme, konsensüs mekanizması ve dağıtık durum yönetimi yoktur.
 
-#### No Replay Capability
+#### Tekrar Oynatma (Replay) Yeteneği Yok
 
-- **Kafka**: Supports message replay through consumer groups and offset management. Consumers can re-read messages from any point in the log, enabling replay of historical events, reprocessing of data, and event sourcing patterns.
+- **Kafka:** Tüketici grupları ve ofset yönetimi aracılığıyla mesaj tekrarını destekler. Tüketiciler log'daki herhangi bir noktadan mesajları yeniden okuyabilir, bu da geçmiş olayların tekrarını, verilerin yeniden işlenmesini ve olay kaynaklama (event sourcing) desenlerini mümkün kılar.
 
-- **CoreNotifyEngine**: Messages are consumed once and immediately removed from the queue. There is no history, no log retention, and no replay capability. Once a message is consumed, it cannot be re-read.
+- **CoreNotifyEngine:** Mesajlar bir kez tüketilir ve hemen kuyruktan kaldırılır. Geçmiş, log saklama ve tekrar oynatma yeteneği yoktur. Bir mesaj tüketildikten sonra tekrar okunamaz.
 
-#### JVM-Bound Lifecycle
+#### JVM'e Bağlı Yaşam Döngüsü
 
-- **Kafka**: Runs as an independent distributed system with its own lifecycle, independent of application JVMs. Kafka brokers can outlive application instances, maintaining message durability and availability across application deployments.
+- **Kafka:** Uygulama JVM'lerinden bağımsız, kendi yaşam döngüsüne sahip bağımsız bir dağıtık sistem olarak çalışır. Kafka broker'ları, uygulama dağıtımları boyunca mesaj dayanıklılığını ve kullanılabilirliğini koruyarak uygulama örneklerinden daha uzun yaşayabilir.
 
-- **CoreNotifyEngine**: Is tightly coupled to the application JVM lifecycle. When the application stops, the engine stops. There is no persistence or independent operation. The queue cannot exist independently of the application process.
+- **CoreNotifyEngine:** Uygulama JVM yaşam döngüsüne sıkı sıkıya bağlıdır. Uygulama durduğunda motor da durur. Kalıcılık veya bağımsız çalışma yoktur. Kuyruk, uygulama sürecinden bağımsız olarak var olamaz.
 
-#### Additional Differences
+#### Ek Farklılıklar
 
-- **Throughput**: Kafka can handle millions of messages per second across a cluster. CoreNotifyEngine is limited to thousands to tens of thousands per second on a single instance.
+- **İş Hacmi:** Kafka, bir küme genelinde saniyede milyonlarca mesajı işleyebilir. CoreNotifyEngine, tek bir örnekte saniyede binlerce ila on binlerce ile sınırlıdır.
 
-- **Partitioning**: Kafka supports topic partitioning for parallel processing and scalability. CoreNotifyEngine has no partitioning concept.
+- **Bölümleme (Partitioning):** Kafka, paralel işleme ve ölçeklenebilirlik için konu bölümlemeyi destekler. CoreNotifyEngine'de bölümleme kavramı yoktur.
 
-- **Ordering Guarantees**: Kafka provides ordering guarantees within partitions. CoreNotifyEngine provides FIFO ordering only within a single instance's queue.
+- **Sıralama Garantileri:** Kafka, bölümler içinde sıralama garantileri sağlar. CoreNotifyEngine, yalnızca tek bir örneğin kuyruğu içinde FIFO sıralaması sağlar.
 
-- **Multi-Subscriber Patterns**: Kafka supports multiple consumer groups reading the same messages independently. CoreNotifyEngine has a single consumer pool per instance.
+- **Çoklu Abone Desenleri:** Kafka, aynı mesajları bağımsız olarak okuyan birden fazla tüketici grubunu destekler. CoreNotifyEngine, örnek başına tek bir tüketici havuzuna sahiptir.
 
-**Use Case Guidance**: Use Kafka for distributed systems requiring durability, high throughput, replay capability, and multi-subscriber patterns. Use CoreNotifyEngine for lightweight, single-instance notification processing where simplicity and zero infrastructure overhead are priorities.
+**Kullanım Durumu Rehberi:** Dayanıklılık, yüksek iş hacmi, tekrar oynatma yeteneği ve çoklu abone desenleri gerektiren dağıtık sistemler için Kafka kullanın. Basitlik ve sıfır altyapı yükünün öncelikli olduğu hafif, tek örnekli bildirim işleme için CoreNotifyEngine kullanın.
 
-### Possible Future Improvements
+### Olası Gelecek İyileştirmeleri
 
-While the current implementation prioritizes simplicity and zero infrastructure dependencies, several improvements could enhance the system for production use cases:
+Mevcut uygulama basitliği ve sıfır altyapı bağımlılığını önceliklendirse de, birkaç iyileştirme sistemi prodüksiyon kullanım durumları için geliştirebilir:
 
-#### Persistence Options
+#### Kalıcılık Seçenekleri
 
-- **Database Backing Store**: Implement a database-backed queue where notifications are persisted before enqueueing. This would enable recovery after restarts, though it would require external database infrastructure and introduce latency.
+- **Veritabanı Destekli Depo:** Bildirimlerin kuyruğa eklenmeden önce kalıcı hale getirildiği veritabanı destekli bir kuyruk uygulayın. Bu, yeniden başlatmalardan sonra kurtarmayı mümkün kılar, ancak harici veritabanı altyapısı gerektirir ve gecikme ekler.
 
-- **Write-Ahead Log (WAL)**: Implement a WAL that writes notifications to disk before or after memory queue operations. This provides durability without requiring full database integration, similar to Kafka's log structure.
+- **Önden Yazmalı Log (WAL):** Bellek kuyruğu işlemlerinden önce veya sonra bildirimleri diske yazan bir WAL uygulayın. Bu, Kafka'nın log yapısına benzer şekilde, tam veritabanı entegrasyonu gerektirmeden dayanıklılık sağlar.
 
-- **Hybrid Approach**: Maintain the in-memory queue for performance but periodically persist queue state to disk. On restart, reload queued notifications from the persisted state.
+- **Hibrit Yaklaşım:** Performans için bellek içi kuyruğu koruyun ancak kuyruk durumunu periyodik olarak diske kaydedin. Yeniden başlatıldığında, kuyruklanmış bildirimleri kaydedilen durumdan yeniden yükleyin.
 
-**Trade-offs**: Persistence adds complexity, latency, and external dependencies, conflicting with the current design goals of simplicity and zero infrastructure.
+**Ödünleşimler (Trade-offs):** Kalıcılık; karmaşıklık, gecikme ve harici bağımlılıklar ekler, bu da mevcut basitlik ve sıfır altyapı tasarım hedefleriyle çelişir.
 
-#### Retry and Dead-Letter Mechanisms
+#### Yeniden Deneme ve Ölü Mektup (Dead-Letter) Mekanizmaları
 
-- **Retry Logic**: Implement configurable retry policies (exponential backoff, max retry count) for failed notification processing. Failed notifications could be re-queued with retry metadata.
+- **Yeniden Deneme Mantığı:** Başarısız bildirim işlemleri için yapılandırılabilir yeniden deneme politikaları (üstel geri çekilme, maksimum deneme sayısı) uygulayın. Başarısız bildirimler, yeniden deneme metadatalarıyla tekrar kuyruğa alınabilir.
 
-- **Dead-Letter Queue**: Route notifications that exceed max retry attempts to a dead-letter queue for manual inspection, analysis, or reprocessing.
+- **Ölü Mektup Kuyruğu:** Maksimum yeniden deneme girişimini aşan bildirimleri manuel inceleme, analiz veya yeniden işleme için bir ölü mektup kuyruğuna yönlendirin.
 
-- **Failure Classification**: Categorize failures (transient vs. permanent) and apply different retry strategies. Transient failures (network timeouts) could be retried, while permanent failures (invalid recipient) could go directly to dead-letter.
+- **Hata Sınıflandırması:** Hataları kategorize edin (geçici vs. kalıcı) ve farklı yeniden deneme stratejileri uygulayın. Geçici hatalar (ağ zaman aşımları) yeniden denenebilirken, kalıcı hatalar (geçersiz alıcı) doğrudan ölü mektuba gidebilir.
 
-**Implementation Considerations**: Retry mechanisms require state tracking (retry count, last failure time) and potentially separate queues or data structures. Dead-letter queues need storage and management interfaces.
+**Uygulama Hususları:** Yeniden deneme mekanizmaları durum takibi (yeniden deneme sayısı, son hata zamanı) ve potansiyel olarak ayrı kuyruklar veya veri yapıları gerektirir. Ölü mektup kuyrukları depolama ve yönetim arayüzlerine ihtiyaç duyar.
 
-#### Metrics and Monitoring
+#### Metrikler ve İzleme
 
-- **Queue Depth Metrics**: Expose queue size, remaining capacity, and queue utilization percentage. This helps identify backpressure and capacity issues.
+- **Kuyruk Derinliği Metrikleri:** Kuyruk boyutunu, kalan kapasiteyi ve kuyruk kullanım yüzdesini dışa açın. Bu, geri basınç ve kapasite sorunlarını belirlemeye yardımcı olur.
 
-- **Throughput Metrics**: Track notification production rate (events/second), consumption rate (events/second), and processing latency (time from enqueue to completion).
+- **İş Hacmi Metrikleri:** Bildirim üretim oranını (olay/saniye), tüketim oranını (olay/saniye) ve işleme gecikmesini (kuyruğa eklemeden tamamlanmaya kadar geçen süre) izleyin.
 
-- **Error Metrics**: Count and categorize processing errors by notification type, handler, and error type. This enables identification of problematic channels or patterns.
+- **Hata Metrikleri:** İşleme hatalarını bildirim türüne, işleyiciye ve hata türüne göre sayın ve kategorize edin. Bu, sorunlu kanalların veya desenlerin belirlenmesini sağlar.
 
-- **Handler Performance Metrics**: Track processing time per handler, success/failure rates per handler, and external service latency (for real handler implementations).
+- **İşleyici Performans Metrikleri:** İşleyici başına işlem süresini, işleyici başına başarı/başarısızlık oranlarını ve harici servis gecikmesini (gerçek işleyici uygulamaları için) izleyin.
 
-- **Integration Points**: Expose metrics via Micrometer/Actuator for integration with Prometheus, Grafana, or other monitoring systems.
+- **Entegrasyon Noktaları:** Prometheus, Grafana veya diğer izleme sistemleriyle entegrasyon için Micrometer/Actuator aracılığıyla metrikleri dışa açın.
 
-**Value**: Comprehensive metrics enable capacity planning, performance tuning, error detection, and operational visibility.
+**Değer:** Kapsamlı metrikler kapasite planlamasını, performans ayarını, hata tespitini ve operasyonel görünürlüğü mümkün kılar.
 
-#### Horizontal Scaling Ideas
+#### Yatay Ölçekleme Fikirleri
 
-- **Shared Queue Backend**: Replace in-memory queue with a shared backend (Redis, RabbitMQ, or database) that multiple instances can access. This would enable horizontal scaling and workload distribution.
+- **Paylaşılan Kuyruk Arka Ucu:** Bellek içi kuyruğu, birden fazla örneğin erişebileceği paylaşılan bir arka uçla (Redis, RabbitMQ veya veritabanı) değiştirin. Bu, yatay ölçekleme ve iş yükü dağıtımını mümkün kılar.
 
-- **Distributed Queue Abstraction**: Implement a queue abstraction layer that can use either in-memory queues (single instance) or distributed queues (multi-instance), allowing the same code to work in both modes.
+- **Dağıtık Kuyruk Soyutlaması:** Hem bellek içi kuyrukları (tek örnek) hem de dağıtık kuyrukları (çoklu örnek) kullanabilen bir kuyruk soyutlama katmanı uygulayın, böylece aynı kod her iki modda da çalışabilir.
 
-- **Work Stealing**: Implement a work-stealing algorithm where instances can steal work from other instances' queues when idle, improving load balancing across instances.
+- **İş Çalma (Work Stealing):** Örneklerin boştayken diğer örneklerin kuyruklarından iş çalabileceği bir iş çalma algoritması uygulayın, bu da örnekler arasında yük dengelemeyi iyileştirir.
 
-- **Partitioning Strategy**: Allow notifications to be partitioned by notification type or other criteria, with different instances handling different partitions.
+- **Bölümleme Stratejisi:** Bildirimlerin bildirim türüne veya diğer kriterlere göre bölümlenmesine izin verin, farklı örnekler farklı bölümleri yönetir.
 
-**Architectural Impact**: Horizontal scaling fundamentally changes the system architecture, requiring distributed coordination, consensus mechanisms, and external infrastructure, which conflicts with the current design philosophy.
+**Mimari Etki:** Yatay ölçekleme, dağıtık koordinasyon, konsensüs mekanizmaları ve harici altyapı gerektirerek sistem mimarisini temelden değiştirir, bu da mevcut tasarım felsefesiyle çelişir.
 
-**Recommendation**: If horizontal scaling is required, consider using established distributed messaging systems (Kafka, RabbitMQ, AWS SQS) rather than extending this engine, unless specific requirements justify the complexity.
+**Öneri:** Yatay ölçekleme gerekiyorsa, belirli gereksinimler karmaşıklığı haklı çıkarmadıkça bu motoru genişletmek yerine yerleşik dağıtık mesajlaşma sistemlerini (Kafka, RabbitMQ, AWS SQS) kullanmayı düşünün.
 
-These improvements represent trade-offs between simplicity and features. Each addition increases complexity, operational overhead, or infrastructure dependencies. The current design intentionally prioritizes simplicity and zero dependencies, making it suitable for specific use cases where these limitations are acceptable.
+Bu iyileştirmeler, basitlik ve özellikler arasındaki ödünleşimleri temsil eder. Her ekleme karmaşıklığı, operasyonel yükü veya altyapı bağımlılıklarını artırır. Mevcut tasarım, bu sınırlamaların kabul edilebilir olduğu belirli kullanım durumları için uygun hale getirerek basitliği ve sıfır bağımlılığı kasıtlı olarak önceliklendirir.
 
-## 13. Non-Goals
+## 13. Hedef Dışı (Non-Goals)
 
-The following are explicitly out of scope for this project:
+Aşağıdakiler açıkça bu projenin kapsamı dışındadır:
 
-- **Distributed Messaging**: This engine is not designed for multi-instance coordination or distributed message queuing across multiple application servers. Notifications are not shared or load-balanced across application instances.
+- **Dağıtık Mesajlaşma:** Bu motor, çoklu örnek koordinasyonu veya birden fazla uygulama sunucusu arasında dağıtık mesaj kuyruklama için tasarlanmamıştır. Bildirimler uygulama örnekleri arasında paylaşılmaz veya yük dengelemesi yapılmaz.
 
-- **Message Persistence**: Notifications are not persisted to disk or database. They exist only in memory and will be lost if the application is restarted or crashes.
+- **Mesaj Kalıcılığı:** Bildirimler diske veya veritabanına kaydedilmez. Sadece bellekte bulunurlar ve uygulama yeniden başlatılırsa veya çökerse kaybolurlar.
 
-- **Message Durability**: Unlike traditional message brokers, there is no guarantee that notifications will survive application restarts. The engine prioritizes simplicity and performance over durability guarantees.
+- **Mesaj Dayanıklılığı:** Geleneksel mesaj aracıları aksine, bildirimlerin uygulama yeniden başlatmalarında hayatta kalacağına dair bir garanti yoktur. Motor, dayanıklılık garantileri yerine basitliği ve performansı önceliklendirir.
 
-- **Advanced Queue Features**: Features such as message priorities, delayed delivery, dead-letter queues, message routing, and topic-based subscriptions are not part of the core design. The engine focuses on simple FIFO (First-In-First-Out) processing.
+- **Gelişmiş Kuyruk Özellikleri:** Mesaj öncelikleri, gecikmeli teslim, ölü mektup kuyrukları, mesaj yönlendirme ve konu tabanlı abonelikler gibi özellikler temel tasarımın bir parçası değildir. Motor basit FIFO (İlk Giren İlk Çıkar) işlemeye odaklanır.
 
-- **External System Integration**: While notifications may call external services (e.g., email providers), the queue infrastructure itself does not integrate with external messaging systems like RabbitMQ, Kafka, or cloud message queues.
+- **Harici Sistem Entegrasyonu:** Bildirimler harici servisleri (örn. e-posta sağlayıcıları) çağırabilse de, kuyruk altyapısının kendisi RabbitMQ, Kafka veya bulut mesaj kuyrukları gibi harici mesajlaşma sistemleriyle entegre olmaz.
 
-- **Transaction Management**: The engine does not provide transactional guarantees between notification production and consumption, or integration with distributed transaction managers.
+- **İşlem (Transaction) Yönetimi:** Motor, bildirim üretimi ve tüketimi arasında işlemsel garantiler veya dağıtık işlem yöneticileriyle entegrasyon sağlamaz.
 
-- **Message Acknowledgment**: Unlike enterprise message brokers, there is no explicit acknowledgment mechanism. Messages are removed from the queue upon consumption.
+- **Mesaj Onayı (Acknowledgment):** Kurumsal mesaj aracılarının aksine, açık bir onay mekanizması yoktur. Mesajlar tüketim üzerine kuyruktan kaldırılır.
 
-- **Load Balancing Across Instances**: Each application instance maintains its own independent queue. There is no coordination or load balancing of notifications across multiple running instances of the application.
-
+- **Örnekler Arası Yük Dengeleme:** Her uygulama örneği kendi bağımsız kuyruğunu korur. Uygulamanın çalışan birden fazla örneği arasında bildirimlerin koordinasyonu veya yük dengelemesi yoktur.
