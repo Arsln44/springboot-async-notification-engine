@@ -518,7 +518,165 @@ The async API design is ideal for:
 
 The async nature means clients cannot determine notification delivery status from the API response alone. For delivery status, clients would need to implement separate tracking mechanisms (e.g., webhooks, status polling, event logs).
 
-## 12. Non-Goals
+## 12. System Limitations and Architectural Considerations
+
+Understanding the limitations and boundaries of the CoreNotifyEngine is crucial for making informed architectural decisions. This section outlines the system's constraints, clarifies why it cannot serve as a replacement for distributed messaging systems like Kafka, and discusses potential improvements for future iterations.
+
+### System Limitations
+
+#### In-Memory Queue Constraints
+
+The notification engine uses an in-memory `BlockingQueue` which imposes several constraints:
+
+- **Memory Boundedness**: Queue capacity is limited by available heap memory. A queue configured with 10,000 capacity and average notification size of 1KB consumes approximately 10MB of heap space just for queue storage (excluding object overhead). Heap size limits effectively cap the maximum queue size.
+
+- **No Persistence**: All queued notifications exist only in JVM heap memory. System crashes, unexpected JVM termination, or out-of-memory conditions result in immediate loss of all queued notifications that haven't been processed.
+
+- **Garbage Collection Impact**: Large queues with many notification objects increase GC pressure. Frequent GC pauses can temporarily slow down both enqueue and dequeue operations, affecting latency and throughput.
+
+- **Queue Size Tuning**: The optimal queue size depends on multiple factors: expected notification volume, processing rate, available memory, and acceptable latency. Too small a queue causes frequent producer blocking; too large a queue wastes memory and increases GC overhead.
+
+#### Data Loss Scenarios
+
+Several scenarios can lead to notification loss:
+
+1. **Application Restart**: Normal application shutdown results in loss of all queued notifications that haven't been processed, even with graceful shutdown. The shutdown process completes in-progress notifications but discards queued items.
+
+2. **Unexpected Termination**: JVM crashes, `kill -9` signals, out-of-memory errors, or system failures cause immediate loss of all queued notifications without any recovery mechanism.
+
+3. **Queue Overflow (Blocking Behavior)**: While the bounded queue prevents unbounded memory growth, when the queue is full, producers block on `put()` operations. If the application is terminated while producers are blocked, those notifications are lost.
+
+4. **Processing Failures**: If a consumer thread crashes or encounters an unhandled exception during processing, the notification being processed at that moment is lost (though this is mitigated by exception handling in the consumer loop).
+
+These data loss characteristics make the system unsuitable for use cases requiring guaranteed delivery or where notification loss is unacceptable.
+
+#### Scalability Boundaries
+
+The system's scalability is fundamentally limited by single-instance constraints:
+
+- **Vertical Scaling Only**: Scalability is achieved only through vertical scaling (increasing CPU cores, memory, thread count). There is no horizontal scaling capability—running multiple application instances does not increase overall capacity; each instance maintains its own independent queue.
+
+- **Thread Pool Limitations**: Consumer thread count is configurable but limited by:
+  - Available CPU cores (optimal thread count is typically 1-2x CPU cores for I/O-bound workloads)
+  - JVM thread limits (typically thousands, but excessive threads cause context switching overhead)
+  - Memory per thread (each thread has its own stack, typically 1MB per thread)
+
+- **Queue Throughput**: Maximum throughput is bounded by:
+  - Consumer thread count and processing speed
+  - Queue capacity (affects how much work can be buffered)
+  - Handler processing latency (network calls to external services)
+
+- **Memory Bottleneck**: As notification volume increases, memory becomes the primary bottleneck. Larger queues require more memory, and processing more notifications simultaneously increases memory pressure.
+
+Practical scalability boundaries: The system can typically handle thousands to tens of thousands of notifications per minute on a single instance, depending on processing complexity, but cannot scale beyond a single machine's resources.
+
+#### Single-Instance Limitations
+
+The engine operates entirely within a single JVM instance, which imposes several constraints:
+
+- **No Distributed Coordination**: Multiple application instances cannot coordinate or share workload. Each instance operates independently with its own queue, consumers, and processing logic. There is no cross-instance communication or load balancing.
+
+- **No High Availability**: The system has no built-in high availability mechanism. If the single instance fails, all processing stops, and all queued notifications are lost. There is no failover or redundancy.
+
+- **Instance-Level Isolation**: Notifications submitted to one instance are never visible to other instances. This means clients must always connect to the same instance to check status (though status checking is not part of the current design).
+
+- **Deployment Constraints**: Horizontal scaling strategies (load balancing across instances) result in independent queues per instance, making it impossible to guarantee uniform notification processing or implement cross-instance features like priority ordering or global rate limiting.
+
+### Why This System is NOT a Kafka Replacement
+
+CoreNotifyEngine should not be considered or used as a replacement for Apache Kafka or similar distributed messaging systems. The architectures serve fundamentally different purposes:
+
+#### Lack of Durability
+
+- **Kafka**: Provides durable message storage with configurable retention policies. Messages are persisted to disk and survive broker restarts, crashes, and failures. Messages can be stored for hours, days, or indefinitely.
+
+- **CoreNotifyEngine**: Messages exist only in memory and are lost on restart or crash. There is no persistence layer, no disk storage, and no retention mechanism.
+
+#### No Distributed Consensus
+
+- **Kafka**: Uses distributed consensus algorithms (ZooKeeper/KRaft) for cluster coordination, leader election, partition management, and metadata synchronization. Multiple brokers can operate as a cohesive cluster with automatic failover.
+
+- **CoreNotifyEngine**: Operates as a single standalone instance with no distributed coordination. There is no cluster, no consensus mechanism, and no distributed state management.
+
+#### No Replay Capability
+
+- **Kafka**: Supports message replay through consumer groups and offset management. Consumers can re-read messages from any point in the log, enabling replay of historical events, reprocessing of data, and event sourcing patterns.
+
+- **CoreNotifyEngine**: Messages are consumed once and immediately removed from the queue. There is no history, no log retention, and no replay capability. Once a message is consumed, it cannot be re-read.
+
+#### JVM-Bound Lifecycle
+
+- **Kafka**: Runs as an independent distributed system with its own lifecycle, independent of application JVMs. Kafka brokers can outlive application instances, maintaining message durability and availability across application deployments.
+
+- **CoreNotifyEngine**: Is tightly coupled to the application JVM lifecycle. When the application stops, the engine stops. There is no persistence or independent operation. The queue cannot exist independently of the application process.
+
+#### Additional Differences
+
+- **Throughput**: Kafka can handle millions of messages per second across a cluster. CoreNotifyEngine is limited to thousands to tens of thousands per second on a single instance.
+
+- **Partitioning**: Kafka supports topic partitioning for parallel processing and scalability. CoreNotifyEngine has no partitioning concept.
+
+- **Ordering Guarantees**: Kafka provides ordering guarantees within partitions. CoreNotifyEngine provides FIFO ordering only within a single instance's queue.
+
+- **Multi-Subscriber Patterns**: Kafka supports multiple consumer groups reading the same messages independently. CoreNotifyEngine has a single consumer pool per instance.
+
+**Use Case Guidance**: Use Kafka for distributed systems requiring durability, high throughput, replay capability, and multi-subscriber patterns. Use CoreNotifyEngine for lightweight, single-instance notification processing where simplicity and zero infrastructure overhead are priorities.
+
+### Possible Future Improvements
+
+While the current implementation prioritizes simplicity and zero infrastructure dependencies, several improvements could enhance the system for production use cases:
+
+#### Persistence Options
+
+- **Database Backing Store**: Implement a database-backed queue where notifications are persisted before enqueueing. This would enable recovery after restarts, though it would require external database infrastructure and introduce latency.
+
+- **Write-Ahead Log (WAL)**: Implement a WAL that writes notifications to disk before or after memory queue operations. This provides durability without requiring full database integration, similar to Kafka's log structure.
+
+- **Hybrid Approach**: Maintain the in-memory queue for performance but periodically persist queue state to disk. On restart, reload queued notifications from the persisted state.
+
+**Trade-offs**: Persistence adds complexity, latency, and external dependencies, conflicting with the current design goals of simplicity and zero infrastructure.
+
+#### Retry and Dead-Letter Mechanisms
+
+- **Retry Logic**: Implement configurable retry policies (exponential backoff, max retry count) for failed notification processing. Failed notifications could be re-queued with retry metadata.
+
+- **Dead-Letter Queue**: Route notifications that exceed max retry attempts to a dead-letter queue for manual inspection, analysis, or reprocessing.
+
+- **Failure Classification**: Categorize failures (transient vs. permanent) and apply different retry strategies. Transient failures (network timeouts) could be retried, while permanent failures (invalid recipient) could go directly to dead-letter.
+
+**Implementation Considerations**: Retry mechanisms require state tracking (retry count, last failure time) and potentially separate queues or data structures. Dead-letter queues need storage and management interfaces.
+
+#### Metrics and Monitoring
+
+- **Queue Depth Metrics**: Expose queue size, remaining capacity, and queue utilization percentage. This helps identify backpressure and capacity issues.
+
+- **Throughput Metrics**: Track notification production rate (events/second), consumption rate (events/second), and processing latency (time from enqueue to completion).
+
+- **Error Metrics**: Count and categorize processing errors by notification type, handler, and error type. This enables identification of problematic channels or patterns.
+
+- **Handler Performance Metrics**: Track processing time per handler, success/failure rates per handler, and external service latency (for real handler implementations).
+
+- **Integration Points**: Expose metrics via Micrometer/Actuator for integration with Prometheus, Grafana, or other monitoring systems.
+
+**Value**: Comprehensive metrics enable capacity planning, performance tuning, error detection, and operational visibility.
+
+#### Horizontal Scaling Ideas
+
+- **Shared Queue Backend**: Replace in-memory queue with a shared backend (Redis, RabbitMQ, or database) that multiple instances can access. This would enable horizontal scaling and workload distribution.
+
+- **Distributed Queue Abstraction**: Implement a queue abstraction layer that can use either in-memory queues (single instance) or distributed queues (multi-instance), allowing the same code to work in both modes.
+
+- **Work Stealing**: Implement a work-stealing algorithm where instances can steal work from other instances' queues when idle, improving load balancing across instances.
+
+- **Partitioning Strategy**: Allow notifications to be partitioned by notification type or other criteria, with different instances handling different partitions.
+
+**Architectural Impact**: Horizontal scaling fundamentally changes the system architecture, requiring distributed coordination, consensus mechanisms, and external infrastructure, which conflicts with the current design philosophy.
+
+**Recommendation**: If horizontal scaling is required, consider using established distributed messaging systems (Kafka, RabbitMQ, AWS SQS) rather than extending this engine, unless specific requirements justify the complexity.
+
+These improvements represent trade-offs between simplicity and features. Each addition increases complexity, operational overhead, or infrastructure dependencies. The current design intentionally prioritizes simplicity and zero dependencies, making it suitable for specific use cases where these limitations are acceptable.
+
+## 13. Non-Goals
 
 The following are explicitly out of scope for this project:
 
