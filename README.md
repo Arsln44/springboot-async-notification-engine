@@ -221,7 +221,90 @@ The `NotificationProducer` is deliberately designed to be unaware of consumers f
 
 This design follows the Producer-Consumer pattern's core principle: producers and consumers communicate only through the shared queue, never directly with each other. This principle ensures a clean separation of concerns and promotes a more maintainable and scalable architecture.
 
-## 9. Non-Goals
+## 9. NotificationConsumer Worker
+
+The `NotificationConsumerWorker` is responsible for continuously polling the `BlockingQueue` for notification events and processing them through the `NotificationProcessor`. Multiple consumer worker threads run concurrently in the background, each executing an infinite loop that polls the queue, retrieves events, and processes them asynchronously.
+
+### Thread Model
+
+The consumer worker uses a fixed-size thread pool (`ExecutorService`) to manage multiple consumer threads:
+
+- **Thread Pool Creation**: An `ExecutorService` with a fixed number of threads (configurable via `notification.queue.consumer-threads`, default: 2) is created during initialization. Each thread in the pool runs a separate consumer worker loop.
+
+- **Worker Thread Naming**: Consumer threads are named "notification-consumer" for easy identification in thread dumps, logging, and debugging. Threads are created as non-daemon threads to ensure they keep the JVM alive and can be properly shut down.
+
+- **Independent Execution**: Each consumer thread operates independently, polling the queue and processing events concurrently. This parallel processing increases throughput, allowing multiple notifications to be processed simultaneously.
+
+- **Blocking Queue Interaction**: All consumer threads share the same `BlockingQueue` instance. The queue's thread-safe implementation ensures that multiple threads can safely poll the queue concurrently without race conditions or data corruption. When a thread calls `take()`, it blocks until an event is available, efficiently waiting without consuming CPU resources.
+
+- **Thread Lifecycle**: Consumer threads are started during Spring bean initialization (when the `NotificationConsumerWorker` bean is created) and continue running until the application shuts down. The threads are managed by the `ExecutorService`, which handles thread creation, lifecycle, and termination.
+
+- **Resource Allocation**: Each consumer thread consumes minimal resources when waiting (blocked on `take()` operation). CPU usage is only consumed when actively processing notifications. This efficient resource usage allows multiple consumer threads to run without significant overhead.
+
+### Why Infinite Loop is Safe Here
+
+The consumer workers use an infinite `while` loop (`while (running.get() && !Thread.currentThread().isInterrupted())`) which is safe and appropriate for this use case:
+
+- **Blocking Operations**: The loop contains a blocking operation (`notificationQueue.take()`) that suspends thread execution when the queue is empty. The thread consumes no CPU cycles while blocked, waiting efficiently for events to arrive. The infinite loop is not a busy-wait loop that would consume CPU resources.
+
+- **Controlled Termination**: The loop is controlled by two conditions:
+  - `running.get()`: An `AtomicBoolean` flag that can be set to `false` during graceful shutdown
+  - `Thread.currentThread().isInterrupted()`: A check for thread interruption, which allows external termination signals (e.g., during application shutdown) to break the loop
+
+- **Exception Handling**: The loop properly handles `InterruptedException`, which is thrown when the thread is interrupted while blocked on `take()`. When interrupted, the loop breaks, allowing the thread to exit cleanly. This ensures that shutdown signals (interruptions) are properly handled.
+
+- **Application Lifetime Alignment**: The infinite loop aligns with the application's lifetime—consumer threads should run continuously while the application is running, processing notifications as they arrive. The loop naturally terminates when the application shuts down (via the shutdown mechanism), making an infinite loop the correct design pattern.
+
+- **No Resource Leakage**: Unlike unbounded loops in other contexts, this loop does not cause resource leaks because:
+  - Blocking operations release CPU resources
+  - Threads are managed by `ExecutorService`, which can be shut down
+  - The loop checks for termination conditions on each iteration
+  - InterruptedException is properly handled, allowing clean exit
+
+- **Standard Pattern**: Infinite loops with blocking operations are a standard pattern in producer-consumer systems, thread pools, and server applications. This is the idiomatic way to implement long-running worker threads that process items from a queue.
+
+The infinite loop is safe because it blocks efficiently, checks termination conditions, handles interruptions properly, and aligns with the application's operational model of continuous processing.
+
+### How Graceful Shutdown Should Work
+
+Graceful shutdown ensures that consumer workers stop processing new events and complete in-progress work before the application terminates. The `NotificationConsumerWorker` implements graceful shutdown using Spring's `@PreDestroy` lifecycle hook:
+
+1. **Shutdown Signal**: When Spring detects application shutdown (e.g., via SIGTERM signal, shutdown endpoint, or application context close), it calls the `@PreDestroy` annotated `shutdown()` method on the `NotificationConsumerWorker` bean.
+
+2. **Running Flag Update**: The shutdown process first sets the `running` flag to `false` using `running.set(false)`. This causes consumer threads to exit their loops after completing the current iteration (once they check the condition `while (running.get() && ...)`).
+
+3. **ExecutorService Shutdown**: The `ExecutorService.shutdown()` method is called, which:
+   - Prevents new tasks from being submitted
+   - Allows in-progress tasks (consumer loops) to complete
+   - Does not forcibly terminate threads
+
+4. **Graceful Wait**: The code waits for threads to terminate using `executorService.awaitTermination(30, TimeUnit.SECONDS)`. This gives consumer threads up to 30 seconds to:
+   - Check the `running` flag
+   - Complete any in-progress notification processing
+   - Exit their loops and terminate
+
+5. **Timeout Handling**: If threads do not terminate within the timeout:
+   - `shutdownNow()` is called, which interrupts all running threads
+   - This causes `InterruptedException` in threads blocked on `take()`, allowing them to exit
+   - Another await with a shorter timeout (10 seconds) provides a final opportunity for threads to terminate
+
+6. **Force Termination**: If threads still do not terminate after the force shutdown, an error is logged, but the shutdown process continues. In practice, threads should terminate quickly after interruption.
+
+7. **Interruption Handling**: If the shutdown process itself is interrupted (unlikely but possible), it calls `shutdownNow()` to ensure threads are interrupted and restores the interrupt status on the current thread.
+
+**Important Considerations**:
+
+- **In-Progress Processing**: Notifications that are being processed when shutdown begins will complete their processing (assuming the processor logic handles the work quickly). Notifications waiting in the queue when shutdown begins will not be processed (they are lost, consistent with the in-memory, non-persistent design).
+
+- **Shutdown Timeout**: The 30-second timeout should be sufficient for most notification processing, but may need adjustment based on typical processing times. Very long-running processor operations might be interrupted.
+
+- **Thread Interruption**: The shutdown mechanism relies on thread interruption to wake threads blocked on `take()`. Processor implementations should avoid swallowing `InterruptedException` to ensure shutdown works correctly.
+
+- **Application Context**: The graceful shutdown works in conjunction with Spring's application context lifecycle. When the context is closed, `@PreDestroy` methods are called, triggering the shutdown sequence.
+
+This graceful shutdown mechanism ensures that the application can shut down cleanly, without leaving threads running or forcing immediate termination that might corrupt state or leave resources in an inconsistent condition.
+
+## 10. Non-Goals
 
 The following are explicitly out of scope for this project:
 

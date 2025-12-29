@@ -1,6 +1,8 @@
 package com.example.config;
 
 import com.example.model.NotificationEvent;
+import com.example.processor.NotificationProcessor;
+import com.example.service.NotificationConsumerWorker;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -30,6 +32,26 @@ public class NotificationQueueConfig {
     @Bean
     public BlockingQueue<NotificationEvent> notificationQueue(NotificationQueueProperties properties) {
         return new LinkedBlockingQueue<>(properties.getCapacity());
+    }
+    
+    /**
+     * Creates a NotificationConsumerWorker bean that starts consumer threads.
+     * 
+     * @param notificationQueue The notification queue
+     * @param notificationProcessor The processor for handling notifications
+     * @param properties Queue configuration properties
+     * @return NotificationConsumerWorker instance
+     */
+    @Bean
+    public NotificationConsumerWorker notificationConsumerWorker(
+            BlockingQueue<NotificationEvent> notificationQueue,
+            NotificationProcessor notificationProcessor,
+            NotificationQueueProperties properties) {
+        return new NotificationConsumerWorker(
+            notificationQueue,
+            notificationProcessor,
+            properties.getConsumerThreads()
+        );
     }
 }
 

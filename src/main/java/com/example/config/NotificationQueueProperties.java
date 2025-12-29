@@ -14,12 +14,25 @@ public class NotificationQueueProperties {
      */
     private int capacity = 1000;
     
+    /**
+     * Number of consumer worker threads that will process notifications concurrently.
+     */
+    private int consumerThreads = 2;
+    
     public int getCapacity() {
         return capacity;
     }
     
     public void setCapacity(int capacity) {
         this.capacity = capacity;
+    }
+    
+    public int getConsumerThreads() {
+        return consumerThreads;
+    }
+    
+    public void setConsumerThreads(int consumerThreads) {
+        this.consumerThreads = consumerThreads;
     }
 }
 
