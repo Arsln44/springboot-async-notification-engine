@@ -304,7 +304,118 @@ Graceful shutdown ensures that consumer workers stop processing new events and c
 
 This graceful shutdown mechanism ensures that the application can shut down cleanly, without leaving threads running or forcing immediate termination that might corrupt state or leave resources in an inconsistent condition.
 
-## 10. Non-Goals
+## 10. Notification Handlers
+
+The notification engine uses an interface-based handler architecture to process different types of notifications (Email, SMS, Push, etc.). This design provides extensibility, allowing new notification channels to be added without modifying existing code.
+
+### Architecture Overview
+
+The handler system consists of three key components:
+
+- **`NotificationHandler` Interface**: Defines the contract for all notification handlers with two methods:
+  - `canHandle(NotificationType)`: Determines if the handler supports a specific notification type
+  - `handle(NotificationEvent)`: Processes and delivers the notification
+
+- **Handler Implementations**: Concrete implementations for each notification channel:
+  - `EmailHandler`: Handles email notifications (mock implementation)
+  - `SMSHandler`: Handles SMS notifications (mock implementation)
+  - `PushHandler`: Handles push notifications (mock implementation)
+  - Additional handlers can be added by implementing the `NotificationHandler` interface
+
+- **`NotificationHandlerRegistry`**: Manages handler registration and selection, providing handler lookup based on notification type
+
+- **`HandlerBasedNotificationProcessor`**: Coordinates notification processing by selecting the appropriate handler via the registry and delegating processing to it
+
+### Handler Selection Logic
+
+The handler selection logic is implemented in the `NotificationHandlerRegistry.getHandler()` method and follows these steps:
+
+1. **Cache Lookup**: First checks an in-memory cache (`ConcurrentHashMap`) for previously resolved handlers. This provides O(1) lookup performance for known notification types after the initial selection.
+
+2. **Handler Iteration**: If not cached, iterates through all registered handlers (injected by Spring as a list of `NotificationHandler` beans). For each handler, calls `canHandle(notificationType)` to check if it supports the requested notification type.
+
+3. **First Match Selection**: Returns the first handler that returns `true` from `canHandle()`. This allows handlers to be registered in priority order if needed, though typically each handler supports exactly one notification type.
+
+4. **Cache Storage**: Once a handler is found, it is stored in the cache for future lookups, eliminating the need for iteration on subsequent requests for the same notification type.
+
+5. **Error Handling**: If no handler is found for a given notification type, throws an `IllegalArgumentException` with a descriptive error message. This fails-fast approach ensures that unsupported notification types are detected immediately.
+
+**Selection Algorithm Pseudocode**:
+```
+getHandler(notificationType):
+  if cached: return cached handler
+  for each registered handler:
+    if handler.canHandle(notificationType):
+      cache handler
+      return handler
+  throw IllegalArgumentException("No handler found")
+```
+
+### Design Principles
+
+The handler architecture follows several key design principles:
+
+- **Open/Closed Principle**: The system is open for extension (new handlers can be added) but closed for modification (existing handlers and the registry don't need changes when adding new handlers).
+
+- **Single Responsibility**: Each handler is responsible for one notification channel, keeping implementations focused and maintainable.
+
+- **Strategy Pattern**: The handler selection mechanism uses the Strategy pattern, allowing the algorithm for selecting handlers to vary independently from the code that uses them.
+
+- **Dependency Injection**: Handlers are automatically discovered and registered via Spring's dependency injection. New handlers are automatically included in the registry without configuration changes.
+
+- **Loose Coupling**: Handlers don't know about each other or about the registry's implementation details. They only need to implement the `NotificationHandler` interface.
+
+### Extensibility
+
+Adding a new notification handler is straightforward and requires no changes to existing code:
+
+1. **Create Handler Implementation**: Implement the `NotificationHandler` interface:
+   ```java
+   @Component
+   public class NewChannelHandler implements NotificationHandler {
+       @Override
+       public boolean canHandle(NotificationType type) {
+           return NotificationType.NEW_CHANNEL == type;
+       }
+       
+       @Override
+       public void handle(NotificationEvent event) throws Exception {
+           // Implementation logic
+       }
+   }
+   ```
+
+2. **Add Notification Type**: If needed, add a new value to the `NotificationType` enum.
+
+3. **Automatic Registration**: Spring automatically discovers the new handler bean and includes it in the registry. No configuration changes are required.
+
+4. **Handler Selection**: The registry automatically includes the new handler in its selection logic. Notifications of the new type will be routed to the new handler.
+
+This extensibility makes it easy to add support for new notification channels (e.g., Slack, Discord, Microsoft Teams) without modifying existing handlers, the registry, or the processor.
+
+### Mock Implementations
+
+The current handler implementations (EmailHandler, SMSHandler, PushHandler) are mock implementations designed for demonstration and testing:
+
+- **EmailHandler**: Simulates email sending with logging and a simulated delay (150ms). In production, this would integrate with email service providers like SendGrid, AWS SES, or Mailgun.
+
+- **SMSHandler**: Simulates SMS sending with logging and a simulated delay (100ms). In production, this would integrate with SMS gateway providers like Twilio, AWS SNS, or Vonage.
+
+- **PushHandler**: Simulates push notification sending with logging and a simulated delay (120ms). In production, this would integrate with push notification services like Firebase Cloud Messaging, Apple Push Notification Service, or OneSignal.
+
+These mock implementations allow the system to be tested and demonstrated without requiring external service integrations, API keys, or network connectivity. Replacing them with real implementations is straightforward: update the `handle()` method to call the actual service API while maintaining the same interface contract.
+
+### Error Handling
+
+Each handler is responsible for handling errors specific to its notification channel:
+
+- **Handler-Level Errors**: If a handler's `handle()` method throws an exception, the exception propagates to the `NotificationConsumerWorker`, which logs the error and continues processing the next notification. This ensures that one failed notification doesn't stop the entire consumer thread.
+
+- **Selection Errors**: If no handler is found for a notification type, an `IllegalArgumentException` is thrown, which is logged as an error. This typically indicates a configuration issue (e.g., a notification type was added but no handler was implemented).
+
+- **Channel-Specific Errors**: Handlers can throw channel-specific exceptions (e.g., `EmailDeliveryException`, `SMSGatewayException`). The processor and consumer layers handle these generically, logging them appropriately. For production systems, handlers might implement retry logic, dead-letter queues, or fallback mechanisms.
+
+## 11. Non-Goals
 
 The following are explicitly out of scope for this project:
 
