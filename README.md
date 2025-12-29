@@ -415,7 +415,110 @@ Each handler is responsible for handling errors specific to its notification cha
 
 - **Channel-Specific Errors**: Handlers can throw channel-specific exceptions (e.g., `EmailDeliveryException`, `SMSGatewayException`). The processor and consumer layers handle these generically, logging them appropriately. For production systems, handlers might implement retry logic, dead-letter queues, or fallback mechanisms.
 
-## 11. Non-Goals
+## 11. REST API Controller
+
+The notification engine exposes a REST API endpoint for submitting notification requests. The API is designed for asynchronous processing, returning immediately after accepting the request without waiting for notification delivery.
+
+### API Endpoint
+
+**POST** `/api/notifications`
+
+Submits a notification request for asynchronous processing.
+
+**Request Body** (JSON):
+```json
+{
+  "notificationType": "EMAIL",
+  "recipient": "user@example.com",
+  "subject": "Welcome",
+  "body": "Welcome to our service!",
+  "priority": "NORMAL",
+  "metadata": {
+    "campaignId": "123"
+  }
+}
+```
+
+**Response** (HTTP 202 Accepted):
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "ACCEPTED",
+  "message": "Notification submitted for processing",
+  "submittedAt": "2024-01-15T10:30:00"
+}
+```
+
+### Input Validation
+
+The API validates incoming requests using Bean Validation annotations:
+
+- **`notificationType`**: Required, must be a valid `NotificationType` enum value (EMAIL, SMS, PUSH, IN_APP, WEBHOOK)
+- **`recipient`**: Required, must not be blank (e.g., email address, phone number, device token)
+- **`body`**: Required, must not be blank (the notification message content)
+- **`subject`**: Optional, used for email and push notifications with titles
+- **`priority`**: Optional, defaults to NORMAL if not provided (LOW, NORMAL, HIGH, URGENT)
+- **`metadata`**: Optional, key-value map for additional context
+
+Validation errors return HTTP 400 Bad Request with detailed error messages indicating which fields failed validation.
+
+### Async Behavior Explained
+
+The REST API endpoint exhibits fully asynchronous behavior:
+
+1. **Immediate Response**: The controller returns HTTP 202 Accepted immediately after validating the request and enqueueing the notification. The response includes a unique notification ID but does not wait for notification delivery.
+
+2. **Request Processing Flow**:
+   - Client sends POST request to `/api/notifications`
+   - Controller validates the request (synchronously, fast operation)
+   - Service creates a `NotificationEvent` with a generated UUID
+   - Service enqueues the event into the `BlockingQueue` (may block if queue is full, but this is a queue operation, not notification delivery)
+   - Controller returns HTTP 202 Accepted with notification ID
+   - Client receives response (request processing complete from client's perspective)
+   - **Meanwhile, in background**: Consumer worker threads poll the queue and process notifications asynchronously
+
+3. **No Waiting for Delivery**: The API does not wait for:
+   - Notification delivery to external services (email providers, SMS gateways, etc.)
+   - Handler processing completion
+   - Consumer worker processing
+   - Any network calls to external notification services
+
+4. **Fire-and-Forget Model**: Once the notification is enqueued and HTTP 202 is returned, the API's responsibility ends. Notification delivery happens in the background, completely decoupled from the HTTP request/response cycle.
+
+5. **Queue Operation**: The only potentially blocking operation is the queue enqueue operation (`put()`), which blocks only if the queue is full (applying backpressure). However, this is still orders of magnitude faster than waiting for actual notification delivery, and it ensures system stability by preventing unbounded queue growth.
+
+### HTTP Status Codes
+
+- **202 Accepted**: Notification request was accepted and enqueued successfully
+- **400 Bad Request**: Request validation failed (missing required fields, invalid values)
+- **500 Internal Server Error**: Unexpected error occurred during request processing
+- **503 Service Unavailable**: Service interrupted during processing (rare, indicates system shutdown)
+
+### Response Time Characteristics
+
+- **Typical Response Time**: < 10ms (validation + queue enqueue, assuming queue has capacity)
+- **Under Load**: May increase if queue is full (producer blocks waiting for space), but still much faster than synchronous notification delivery
+- **Network Independence**: Response time is independent of external notification service latency, network conditions, or notification delivery success/failure
+
+### Error Handling
+
+- **Validation Errors**: Returned immediately with HTTP 400 and detailed field-level error messages
+- **Queue Full**: If the queue is at capacity, the `put()` operation blocks until space becomes available. This applies backpressure to clients but ensures no notifications are lost
+- **Interruption**: If the service is shutting down and the thread is interrupted, returns HTTP 503
+- **Processing Errors**: Errors during notification delivery (after HTTP 202 is returned) are handled by consumer workers and logged, but do not affect the API response
+
+### Use Cases
+
+The async API design is ideal for:
+
+- **High-Throughput Scenarios**: Can accept thousands of notification requests per second without being blocked by slow external services
+- **User-Facing Operations**: User registration, order placement, and other operations that trigger notifications don't wait for notification delivery, improving user experience
+- **Batch Operations**: Can submit large numbers of notifications quickly without waiting for each to be delivered
+- **Resilient Systems**: External notification service outages don't block the API (notifications queue up for processing when services recover)
+
+The async nature means clients cannot determine notification delivery status from the API response alone. For delivery status, clients would need to implement separate tracking mechanisms (e.g., webhooks, status polling, event logs).
+
+## 12. Non-Goals
 
 The following are explicitly out of scope for this project:
 
